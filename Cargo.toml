@@ -7,7 +7,7 @@ repository = "https://github.com/felipesere/node-semver-rs"
 documentation = "https://docs.rs/node-semver"
 license = "Apache-2.0"
 readme = "README.md"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 miette = "5.3.0"
