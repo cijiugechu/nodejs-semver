@@ -3,7 +3,7 @@
 [changelog]
 # changelog header
 header = """
-# `node-semver` Release Changelog
+# `nodejs-semver` Release Changelog
 
 """
 
@@ -20,7 +20,7 @@ body = """
 ### {{ group | upper_first }}
 {% for commit in commits %}
 {% if commit.scope %}\
-* **{{ commit.scope }}:** {{ commit.message }} ([{{ commit.id | truncate(length=8, end="") }}](https://github.com/felipesere/node-semver-rs/commit/{{ commit.id }}))
+* **{{ commit.scope }}:** {{ commit.message }} ([{{ commit.id | truncate(length=8, end="") }}](https://github.com/cijiugechu/nodejs-semver-rs/commit/{{ commit.id }}))
 {%- if commit.breaking %}
     * **BREAKING CHANGE**: {{ commit.breaking_description }}
 {%- endif %}\

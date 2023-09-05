@@ -1,10 +1,10 @@
 [package]
 name = "nodejs-semver"
 version = "2.1.1-alpha.0"
-authors = ["Felipe Sere <felipesere@gmail.com>", "Kat Marchán <kzm@zkat.tech>"]
+authors = ["cijiugechu <cijiugechu@gmail.com>", "Felipe Sere <felipesere@gmail.com>", "Kat Marchán <kzm@zkat.tech>"]
 description = "A node-semver compliant semver implementation in Rust."
-repository = "https://github.com/felipesere/node-semver-rs"
-documentation = "https://docs.rs/node-semver"
+repository = "https://github.com/cijiugechu/nodejs-semver"
+documentation = "https://docs.rs/nodejs-semver"
 license = "Apache-2.0"
 readme = "README.md"
 edition = "2021"
