@@ -318,7 +318,7 @@ Node-style semver range.
 These ranges map mostly 1:1 to semver's except for some internal representation
 details that allow some more interesting set-level operations.
 
-For details on supported syntax, see https://github.com/npm/node-semver#advanced-range-syntax
+For details on supported syntax, see <https://github.com/npm/node-semver#advanced-range-syntax>
 */
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Range(Vec<BoundSet>);
