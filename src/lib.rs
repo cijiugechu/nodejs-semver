@@ -139,20 +139,20 @@ The specific kind of error that occurred. Usually wrapped in a [SemverError].
 pub enum SemverErrorKind {
     /**
     Semver strings overall can't be longer than [MAX_LENGTH]. This is a
-    restriction coming from the JavaScript `node-semver`.
+    restriction coming from the JavaScript `nodejs-semver`.
     */
     #[error("Semver string can't be longer than {} characters.", MAX_LENGTH)]
-    #[diagnostic(code(node_semver::too_long), url(docsrs))]
+    #[diagnostic(code(nodejs_semver::too_long), url(docsrs))]
     MaxLengthError,
 
     /**
-    Input to `node-semver` must be "complete". That is, a version must be
+    Input to `nodejs-semver` must be "complete". That is, a version must be
     composed of major, minor, and patch segments, with optional prerelease
     and build metadata. If you're looking for alternative syntaxes, like `1.2`,
     that are meant for defining semver ranges, use [Range] instead.
     */
     #[error("Incomplete input to semver parser.")]
-    #[diagnostic(code(node_semver::incomplete_input), url(docsrs))]
+    #[diagnostic(code(nodejs_semver::incomplete_input), url(docsrs))]
     IncompleteInput,
 
     /**
@@ -161,15 +161,15 @@ pub enum SemverErrorKind {
     occurs when Rust's own integer parsing failed.
     */
     #[error("Failed to parse an integer component of a semver string: {0}")]
-    #[diagnostic(code(node_semver::parse_int_error), url(docsrs))]
+    #[diagnostic(code(nodejs_semver::parse_int_error), url(docsrs))]
     ParseIntError(ParseIntError),
 
     /**
-    `node-semver` inherits the JavaScript implementation's limitation on
+    `nodejs-semver` inherits the JavaScript implementation's limitation on
     limiting integer component sizes to [MAX_SAFE_INTEGER].
     */
     #[error("Integer component of semver string is larger than JavaScript's Number.MAX_SAFE_INTEGER: {0}")]
-    #[diagnostic(code(node_semver::integer_too_large), url(docsrs))]
+    #[diagnostic(code(nodejs_semver::integer_too_large), url(docsrs))]
     MaxIntError(u64),
 
     /**
@@ -177,13 +177,13 @@ pub enum SemverErrorKind {
     failed to parse.
     */
     #[error("Failed to parse {0}.")]
-    #[diagnostic(code(node_semver::parse_component_error), url(docsrs))]
+    #[diagnostic(code(nodejs_semver::parse_component_error), url(docsrs))]
     Context(&'static str),
 
     /**
      */
     #[error("No valid ranges could be parsed")]
-    #[diagnostic(code(node_semver::no_valid_ranges), url(docsrs), help("node-semver parses in so-called 'loose' mode. This means that if you have a slightly incorrect semver operator (`>=1.y`, for ex.), it will get thrown away. This error only happens if _all_ your input ranges were invalid semver in this way."))]
+    #[diagnostic(code(nodejs_semver::no_valid_ranges), url(docsrs), help("nodejs-semver parses in so-called 'loose' mode. This means that if you have a slightly incorrect semver operator (`>=1.y`, for ex.), it will get thrown away. This error only happens if _all_ your input ranges were invalid semver in this way."))]
     NoValidRanges,
 
     /**
@@ -191,7 +191,7 @@ pub enum SemverErrorKind {
     into it.
     */
     #[error("An unspecified error occurred.")]
-    #[diagnostic(code(node_semver::other), url(docsrs))]
+    #[diagnostic(code(nodejs_semver::other), url(docsrs))]
     Other,
 }
 
@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn version_prefixed_with_v() {
-        // TODO: This is part of strict parsing for node-semver!
+        // TODO: This is part of strict parsing for nodejs-semver!
         let v = Version::parse("v1.2.3").unwrap();
         assert_eq!(
             v,

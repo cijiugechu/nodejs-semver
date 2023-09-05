@@ -1,3 +1,5 @@
+# `nodejs-semver`
+
 This crate is a pure Rust-based implementation of JavaScript's
 [`node-semver`](https://npm.im/semver). That is, it's designed to be
 compatible with Node/NPM's particular flavor of semver (which the [`semver`
@@ -11,11 +13,11 @@ converting versions and ranges to strings.
 
 ## Usage
 
-`node-semver` includes two main types: [Version] and [Range]. See [the
-documentation](https://docs.rs/node-semver) for more details.:
+`nodejs-semver` includes two main types: [Version] and [Range]. See [the
+documentation](https://docs.rs/nodejs-semver) for more details.:
 
 ```rust
-use node_semver::{Range, Version};
+use nodejs_semver::{Range, Version};
 
 let version: Version = "1.2.3".parse().unwrap();
 let range: Range = "^1.2".parse().unwrap();

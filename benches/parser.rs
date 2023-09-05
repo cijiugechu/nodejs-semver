@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use node_semver::{Range, Version};
+use nodejs_semver::{Range, Version};
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("range", |b| {
