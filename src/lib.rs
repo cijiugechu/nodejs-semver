@@ -360,8 +360,8 @@ impl std::convert::From<(u64, u64, u64)> for Version {
             major,
             minor,
             patch,
-            build: Vec::new(),
-            pre_release: Vec::new(),
+            build: Vec::with_capacity(2),
+            pre_release: Vec::with_capacity(2),
         }
     }
 }
@@ -557,8 +557,8 @@ mod tests {
                 major: 1,
                 minor: 2,
                 patch: 34,
-                build: Vec::new(),
-                pre_release: Vec::new(),
+                build: Vec::with_capacity(2),
+                pre_release: Vec::with_capacity(2),
             }
         );
     }
@@ -574,7 +574,7 @@ mod tests {
                 minor: 2,
                 patch: 34,
                 build: vec![Numeric(123), Numeric(456)],
-                pre_release: Vec::new(),
+                pre_release: Vec::with_capacity(2),
             }
         );
     }
@@ -590,7 +590,7 @@ mod tests {
                 minor: 2,
                 patch: 34,
                 pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
-                build: Vec::new(),
+                build: Vec::with_capacity(2),
             }
         );
     }
