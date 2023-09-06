@@ -1,5 +1,10 @@
 # `nodejs-semver`
 
+[![Cargo](https://img.shields.io/crates/v/nodejs-semver.svg)](
+https://crates.io/crates/nodejs-semver)
+[![Documentation](https://docs.rs/nodejs-semver/badge.svg)](
+https://docs.rs/nodejs-semver)
+
 This crate is a pure Rust-based implementation of JavaScript's
 [`node-semver`](https://npm.im/semver). That is, it's designed to be
 compatible with Node/NPM's particular flavor of semver (which the [`semver`
