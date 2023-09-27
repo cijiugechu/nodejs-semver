@@ -10,7 +10,7 @@ use nom::multi::{many_till, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::{Err, IResult};
 
-use crate::{extras, number, Identifier, SemverError, SemverErrorKind, SemverParseError, Version};
+use crate::{extras, number, Identifier, SemverError, SemverErrorKind, SemverParseError, Version, MAX_SAFE_INTEGER};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 struct BoundSet {
@@ -637,12 +637,23 @@ fn primitive(input: &str) -> IResult<&str, Option<BoundSet>, SemverParseError<&s
                     LessThanEquals,
                     Partial {
                         major,
+                        minor: None,
+                        patch: None,
+                        ..
+                    },
+                ) => BoundSet::at_most(Predicate::Including(
+                    (major.unwrap_or(0), MAX_SAFE_INTEGER, MAX_SAFE_INTEGER).into(),
+                )),
+                (
+                    LessThanEquals,
+                    Partial {
+                        major,
                         minor,
                         patch: None,
                         ..
                     },
                 ) => BoundSet::at_most(Predicate::Including(
-                    (major.unwrap_or(0), minor.unwrap_or(0), 0, 0).into(),
+                    (major.unwrap_or(0), minor.unwrap_or(0), MAX_SAFE_INTEGER).into(),
                 )),
                 (LessThanEquals, partial) => {
                     BoundSet::at_most(Predicate::Including(partial.into()))
