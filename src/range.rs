@@ -10,7 +10,10 @@ use nom::multi::{many_till, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::{Err, IResult};
 
-use crate::{extras, number, Identifier, SemverError, SemverErrorKind, SemverParseError, Version, MAX_SAFE_INTEGER};
+use crate::{
+    extras, number, Identifier, SemverError, SemverErrorKind, SemverParseError, Version,
+    MAX_SAFE_INTEGER,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 struct BoundSet {
@@ -1114,17 +1117,17 @@ create_tests_for! {
 
     greater_than_eq_123   => ">=1.2.3", {
         allows => ["<=1.2.4", "3.0.0", "<2", ">=3", ">3.0.0"],
-        denies => ["<=1.2.0", "1.0.0", "<1", "<=1.2"],
+        denies => ["<=1.2.0", "1.0.0", "<1"],
     },
 
     greater_than_123   => ">1.2.3", {
         allows => ["<=1.2.4", "3.0.0", "<2", ">=3", ">3.0.0"],
-        denies => ["<=1.2.3", "1.0.0", "<1", "<=1.2"],
+        denies => ["<=1.2.3", "1.0.0", "<1"],
     },
 
     eq_123   => "1.2.3", {
         allows => ["1.2.3", "1 - 2"],
-        denies => ["<1.2.3", "1.0.0", "<=1.2", ">4.5.6", ">5"],
+        denies => ["<1.2.3", "1.0.0", ">4.5.6", ">5"],
     },
 
     lt_eq_123  => "<=1.2.3", {
@@ -1483,6 +1486,29 @@ mod satisfies_ranges_tests {
     }
 
     #[test]
+    fn less_than_equals_major() {
+        let parsed = Range::parse("<=1").expect("unable to parse");
+
+        assert!(parsed.satisfies(&(0, 2, 3).into()), "major below");
+        assert!(parsed.satisfies(&(1, 1, 3).into()), "minor below");
+        assert!(parsed.satisfies(&(1, 2, 2).into()), "minor below");
+        assert!(parsed.satisfies(&(1, 2, 3).into()), "minor below");
+        assert!(parsed.satisfies(&(1, 2, 4).into()), "minor below");
+        refute!(parsed.satisfies(&(2, 0, 0).into()), "above");
+    }
+
+    #[test]
+    fn less_than_equals_minor() {
+        let parsed = Range::parse("<=1.2").expect("unable to parse");
+
+        assert!(parsed.satisfies(&(0, 2, 3).into()), "major below");
+        assert!(parsed.satisfies(&(1, 1, 3).into()), "minor below");
+        assert!(parsed.satisfies(&(1, 2, 1).into()), "patch below");
+        assert!(parsed.satisfies(&(1, 2, 5).into()), "patch below");
+        refute!(parsed.satisfies(&(1, 3, 0).into()), "above");
+    }
+
+    #[test]
     fn only_major() {
         let parsed = Range::parse("1").expect("unable to parse");
 
@@ -1579,7 +1605,7 @@ mod tests {
         single_sided_lower_equals_bound_2 => [">=0.1.97", ">=0.1.97"],
         single_sided_lower_bound => [">1.0.0", ">1.0.0"],
         single_sided_upper_equals_bound => ["<=2.0.0", "<=2.0.0"],
-        single_sided_upper_equals_bound_with_minor => ["<=2.0", "<=2.0.0-0"],
+        single_sided_upper_equals_bound_with_minor => ["<=2.0", "<=2.0.900719925474099"],
         single_sided_upper_bound => ["<2.0.0", "<2.0.0"],
         major_and_minor => ["2.3", ">=2.3.0 <2.4.0-0"],
         major_dot_x => ["2.x", ">=2.0.0 <3.0.0-0"],
