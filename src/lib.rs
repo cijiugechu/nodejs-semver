@@ -249,6 +249,32 @@ impl fmt::Display for Identifier {
     }
 }
 
+/// difference between two versions by the release type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VersionDiff {
+    Major,
+    Minor,
+    Patch,
+    PreMajor,
+    PreMinor,
+    PrePatch,
+    PreRelease,
+}
+
+impl fmt::Display for VersionDiff {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VersionDiff::Major => write!(f, "major"),
+            VersionDiff::Minor => write!(f, "minor"),
+            VersionDiff::Patch => write!(f, "patch"),
+            VersionDiff::PreMajor => write!(f, "premajor"),
+            VersionDiff::PreMinor => write!(f, "preminor"),
+            VersionDiff::PrePatch => write!(f, "prepatch"),
+            VersionDiff::PreRelease => write!(f, "prerelease"),
+        }
+    }
+}
+
 /**
 A semantic version, conformant to the [semver spec](https://semver.org/spec/v2.0.0.html).
 */
@@ -305,6 +331,76 @@ impl Version {
                 },
             }),
         }
+    }
+
+    /// difference between two versions by the release type,
+    /// or `None` if the versions are the same.
+    pub fn diff(&self, other: &Self) -> Option<VersionDiff> {
+        let cmp_result = self.cmp(other);
+
+        if cmp_result == Ordering::Equal {
+            return None;
+        }
+
+        let self_higher = cmp_result == Ordering::Greater;
+        let high_version = if self_higher { self } else { other };
+        let low_version = if self_higher { other } else { self };
+        let high_has_pre = high_version.is_prerelease();
+        let low_has_pre = low_version.is_prerelease();
+
+        if low_has_pre && !high_has_pre {
+            // Going from prerelease -> no prerelease requires some special casing
+
+            // If the low version has only a major, then it will always be a major
+            // Some examples:
+            // 1.0.0-1 -> 1.0.0
+            // 1.0.0-1 -> 1.1.1
+            // 1.0.0-1 -> 2.0.0
+            if low_version.patch == 0 && low_version.minor == 0 {
+                return Some(VersionDiff::Major);
+            }
+
+            // Otherwise it can be determined by checking the high version
+            if high_version.patch != 0 {
+                // anything higher than a patch bump would result in the wrong version
+                return Some(VersionDiff::Patch);
+            }
+
+            if high_version.minor != 0 {
+                // anything higher than a minor bump would result in the wrong version
+                return Some(VersionDiff::Minor);
+            }
+
+            // bumping major/minor/patch all have same result
+            return Some(VersionDiff::Major);
+        }
+
+        if self.major != other.major {
+            if high_has_pre {
+                return Some(VersionDiff::PreMajor);
+            }
+
+            return Some(VersionDiff::Major);
+        }
+
+        if self.minor != other.minor {
+            if high_has_pre {
+                return Some(VersionDiff::PreMinor);
+            }
+
+            return Some(VersionDiff::Minor);
+        }
+
+        if self.patch != other.patch {
+            if high_has_pre {
+                return Some(VersionDiff::PrePatch);
+            }
+
+            return Some(VersionDiff::Patch);
+        }
+
+        // high and low are preleases
+        Some(VersionDiff::PreRelease)
     }
 }
 
@@ -812,5 +908,57 @@ mod tests {
                 build: vec![],
             }
         );
+    }
+
+    fn asset_version_diff(left: &str, right: &str, expected: &str) {
+        let left = Version::parse(left).unwrap();
+        let right = Version::parse(right).unwrap();
+        let expected_diff = match expected {
+            "major" => Some(VersionDiff::Major),
+            "minor" => Some(VersionDiff::Minor),
+            "patch" => Some(VersionDiff::Patch),
+            "premajor" => Some(VersionDiff::PreMajor),
+            "preminor" => Some(VersionDiff::PreMinor),
+            "prepatch" => Some(VersionDiff::PrePatch),
+            "null" => None,
+            _ => unreachable!("unexpected version diff"),
+        };
+
+        assert_eq!(
+            left.diff(&right),
+            expected_diff,
+            "left: {}, right: {}",
+            left,
+            right
+        );
+    }
+
+    #[test]
+    fn version_diffs() {
+        let cases = vec![
+            ("1.2.3", "0.2.3", "major"),
+            ("0.2.3", "1.2.3", "major"),
+            ("1.4.5", "0.2.3", "major"),
+            ("1.2.3", "2.0.0-pre", "premajor"),
+            ("2.0.0-pre", "1.2.3", "premajor"),
+            ("1.2.3", "1.3.3", "minor"),
+            ("1.0.1", "1.1.0-pre", "preminor"),
+            ("1.2.3", "1.2.4", "patch"),
+            ("1.2.3", "1.2.4-pre", "prepatch"),
+            ("1.0.0", "1.0.0", "null"),
+            ("1.0.0-1", "1.0.0-1", "null"),
+            ("0.0.2-1", "0.0.2", "patch"),
+            ("0.0.2-1", "0.0.3", "patch"),
+            ("0.0.2-1", "0.1.0", "minor"),
+            ("0.0.2-1", "1.0.0", "major"),
+            ("0.1.0-1", "0.1.0", "minor"),
+            ("1.0.0-1", "2.0.0-1", "premajor"),
+            ("1.0.0-1", "1.1.0-1", "preminor"),
+            ("1.0.0-1", "1.0.1-1", "prepatch"),
+        ];
+
+        for case in cases {
+            asset_version_diff(case.0, case.1, case.2);
+        }
     }
 }
