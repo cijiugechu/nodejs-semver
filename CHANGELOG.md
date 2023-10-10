@@ -1,5 +1,34 @@
 # `node-semver` Release Changelog
 
+<a name="3.0.1"></a>
+## 3.0.1(2023-09-29)
+
+### Bug Fixes
+
+* **range:** make `<=11` work the same as in npm (#1) ([6438d9f4](https://github.com/cijiugechu/nodejs-semver/commit/6438d9f46a888b4296a665673e3361b35999979b))
+
+<a name="3.0.0"></a>
+## 3.0.0 (2023-09-06)
+
+### **BREAKING CHANGE**
+
+remove unnecessary `serde`([18f26b43](https://github.com/cijiugechu/nodejs-semver/commit/18f26b4305150385fb174a8c60c50a328e4998d6))
+
+### Performance
+
+* **vector:** initialize vector with capacity([f454c8e1](https://github.com/cijiugechu/nodejs-semver/commit/f454c8e1ad04b7b41adbb5a5aa6d8e46e694cc2f))
+
+<a name="2.2.0"></a>
+## 2.2.0 (2023-09-05)
+
+### Miscellaneous Tasks
+
+* **crate:** Project forked.
+
+### Performance
+
+* **syscall:** Reduced unnecessary cloning operations([598e3554](https://github.com/cijiugechu/nodejs-semver/commit/598e355476e19e96f7dd6dd1582d65b7fdc13221))
+
 <a name="2.1.0"></a>
 ## 2.1.0 (2022-09-21)
 
