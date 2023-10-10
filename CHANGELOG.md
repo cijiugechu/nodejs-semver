@@ -1,7 +1,7 @@
-# `node-semver` Release Changelog
+# `nodejs-semver` Release Changelog
 
 <a name="3.0.1"></a>
-## 3.0.1(2023-09-29)
+## 3.0.1 (2023-09-29)
 
 ### Bug Fixes
 
