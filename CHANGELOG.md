@@ -1,5 +1,16 @@
 # `nodejs-semver` Release Changelog
 
+<a name="3.1.0"></a>
+## 3.1.0 (2023-10-10)
+
+### Miscellaneous Tasks
+
+* **deps:** bump deps
+
+### Features
+
+* **diff:** add `diff` for `Version` ([1dae57fa](https://github.com/cijiugechu/nodejs-semver/commit/1dae57faa246ed8bd3207d29893f0c9c2f0bea78))
+
 <a name="3.0.1"></a>
 ## 3.0.1 (2023-09-29)
 
