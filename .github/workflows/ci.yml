@@ -7,18 +7,18 @@ env:
 
 jobs:
   fmt_and_docs:
-    name: Check fmt & build docs
+    name: Clippy & Format & Docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
-          profile: minimal
+          profile: default
           toolchain: stable
-          components: rustfmt
-          override: true
       - uses: Swatinem/rust-cache@v2
+      - name: clippy
+        run: cargo clippy --all -- -D warnings
       - name: rustfmt
         run: cargo fmt --all -- --check
       - name: docs
@@ -39,10 +39,7 @@ jobs:
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
-          components: clippy
           override: true
       - uses: Swatinem/rust-cache@v2
-      - name: Clippy
-        run: cargo clippy --all -- -D warnings
       - name: Run tests
         run: cargo test --all --verbose
