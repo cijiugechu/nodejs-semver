@@ -15,3 +15,4 @@ Cargo.lock
 *.pdb
 
 /.vscode
+node_modules
