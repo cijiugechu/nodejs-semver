@@ -333,8 +333,8 @@ impl Version {
         }
     }
 
-    /// difference between two versions by the release type,
-    /// or `None` if the versions are the same.
+    /// difference between two [Version]s by the release type,
+    /// or `None` if the [Version]s are the same.
     pub fn diff(&self, other: &Self) -> Option<VersionDiff> {
         let cmp_result = self.cmp(other);
 
