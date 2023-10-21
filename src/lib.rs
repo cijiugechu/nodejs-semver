@@ -299,6 +299,10 @@ impl Version {
     }
 
     /// Parse a semver string into a [Version].
+    ///
+    /// ```rust
+    #[doc = include_str!("../examples/parse.rs")]
+    /// ```
     pub fn parse<S: AsRef<str>>(input: S) -> Result<Version, SemverError> {
         let input = input.as_ref();
 
@@ -335,6 +339,10 @@ impl Version {
 
     /// difference between two [Version]s by the release type,
     /// or `None` if the [Version]s are the same.
+    ///
+    /// ```rust
+    #[doc = include_str!("../examples/diff.rs")]
+    /// ```
     pub fn diff(&self, other: &Self) -> Option<VersionDiff> {
         let cmp_result = self.cmp(other);
 
