@@ -34,8 +34,6 @@ jobs:
       - uses: actions/checkout@v3
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy, rust-docs
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: cargo test --all --verbose
