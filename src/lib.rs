@@ -261,6 +261,9 @@ pub enum VersionDiff {
     PreRelease,
 }
 
+/// difference between two versions
+pub type ReleaseType = VersionDiff;
+
 impl fmt::Display for VersionDiff {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
