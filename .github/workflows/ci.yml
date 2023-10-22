@@ -12,10 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: default
-          toolchain: stable
+          components: rustfmt, clippy, rust-docs
       - uses: Swatinem/rust-cache@v2
       - name: clippy
         run: cargo clippy --all -- -D warnings
@@ -29,17 +28,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        rust: [1.73.0]
         os: [ubuntu-latest, macOS-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
+          components: rustfmt, clippy, rust-docs
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: cargo test --all --verbose
