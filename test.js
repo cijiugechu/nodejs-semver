@@ -1,6 +1,6 @@
 const semver = require('semver')
 
-const versions = ['2.1.0']
-const range = '>=1.0.0 <2.0.0'
+const versions = ['1.2.3', '1.2.2', '1.2.4']
+const range = '~1.2.3'
 
-console.log(semver.maxSatisfying(versions, range))
+console.log(semver.minSatisfying(versions, range))

@@ -465,11 +465,19 @@ impl Range {
     pub fn max_satisfying<'v>(&self, versions: &'v [Version]) -> Option<&'v Version> {
         let filtered: Vec<_> = versions.iter().filter(|v| self.satisfies(v)).collect();
 
-        if filtered.is_empty() {
-            None
-        } else {
-            filtered.into_iter().max()
-        }
+        filtered.into_iter().max()
+    }
+
+    /// Return the lowest [Version] in the list that satisfies the range,
+    /// or `None` if none of them do.
+    ///
+    /// ```rust
+    #[doc = include_str!("../examples/min_satisfying.rs")]
+    ///
+    pub fn min_satisfying<'v>(&self, versions: &'v [Version]) -> Option<&'v Version> {
+        let filtered: Vec<_> = versions.iter().filter(|v| self.satisfies(v)).collect();
+
+        filtered.into_iter().min()
     }
 }
 
@@ -1765,6 +1773,67 @@ mod max_satisfying {
             .map(|s| Version::parse(s).unwrap())
             .collect();
         let result = range.max_satisfying(&versions);
+
+        assert_eq!(result, None);
+    }
+}
+
+#[cfg(test)]
+mod min_satisfying {
+    use super::*;
+
+    fn assert_min_satisfying(versions: Vec<&str>, range: &str, expected: &str) {
+        let versions: Vec<_> = versions
+            .into_iter()
+            .map(|s| Version::parse(s).unwrap())
+            .collect();
+        let range = Range::parse(range).unwrap();
+        let result = range.min_satisfying(&versions);
+
+        assert_eq!(
+            result,
+            Some(&Version::parse(expected).unwrap()),
+            "expected: {}, got: {:?}",
+            expected,
+            result
+        );
+    }
+
+    #[test]
+    fn test_min_satisfying() {
+        let cases = vec![
+            (vec!["1.2.3", "1.2.4"], "1.2", "1.2.3"),
+            (vec!["1.2.4", "1.2.3"], "1.2", "1.2.3"),
+            (vec!["1.2.3", "1.2.4", "1.2.5", "1.2.6"], "~1.2.3", "1.2.3"),
+            (
+                vec!["1.1.0", "1.2.0", "1.2.1", "1.3.0", "2.0.0", "2.1.0"],
+                "~2.0.0",
+                "2.0.0",
+            ),
+        ];
+
+        for case in cases {
+            assert_min_satisfying(case.0, case.1, case.2);
+        }
+    }
+
+    #[test]
+    fn test_min_satisfying_empty() {
+        let range = Range::parse("~1.2.3").unwrap();
+        let versions = vec![];
+        let result = range.min_satisfying(&versions);
+
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_min_satisfying_none() {
+        let range = Range::parse(">=1.0.0 <2.0.0").unwrap();
+        let versions: Vec<_> = vec!["2.0.0", "0.1.0"]
+            .iter()
+            .map(|s| Version::parse(s).unwrap())
+            .collect();
+        let result = range.min_satisfying(&versions);
 
         assert_eq!(result, None);
     }
