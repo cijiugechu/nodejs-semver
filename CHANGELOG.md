@@ -1,5 +1,18 @@
 # `nodejs-semver` Release Changelog
 
+<a name="3.2.0"></a>
+## 3.2.0 (2023-10-22)
+
+### Features
+
+* **range:** add `max_satisfying` ([5efbeaa](https://github.com/cijiugechu/nodejs-semver/commit/5efbeaa35982d4ebc4ab1cbb393d1bba20b5b3d1)) and `min_satisfying` ([a476865](https://github.com/cijiugechu/nodejs-semver/commit/a4768658bc225e92c05862c13f59357f75d83583))
+
+* **type:** add `ReleaseType` ([10e0caa](https://github.com/cijiugechu/nodejs-semver/commit/10e0caaa64b14d6a086a337c72c5a26ad5fa1328))
+
+### Documentation
+
+* **examples:** add examples ([648b45c](https://github.com/cijiugechu/nodejs-semver/commit/648b45ceed08b299455617a9bea68705e4c82861))
+
 <a name="3.1.0"></a>
 ## 3.1.0 (2023-10-10)
 
