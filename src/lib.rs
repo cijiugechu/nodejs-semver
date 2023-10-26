@@ -1,5 +1,8 @@
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "serde")]
+use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
+
 use std::cmp::{self, Ordering};
 use std::fmt;
 use std::num::ParseIntError;
@@ -288,6 +291,21 @@ pub struct Version {
     pub patch: u64,
     pub build: Vec<Identifier>,
     pub pre_release: Vec<Identifier>,
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for Version {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for Version {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 impl Version {
@@ -971,5 +989,28 @@ mod tests {
         for case in cases {
             asset_version_diff(case.0, case.1, case.2);
         }
+    }
+}
+
+#[cfg(feature = "serde")]
+#[cfg(test)]
+mod serde_tests {
+    use super::Identifier::*;
+    use super::*;
+
+    #[test]
+    fn version_serde() {
+        let v = Version {
+            major: 1,
+            minor: 2,
+            patch: 3,
+            pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
+            build: vec![AlphaNumeric("build".into())],
+        };
+
+        let serialized = serde_json::to_string(&v).unwrap();
+        let deserialized: Version = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(v, deserialized);
     }
 }

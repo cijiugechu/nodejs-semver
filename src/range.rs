@@ -10,6 +10,9 @@ use nom::multi::{many_till, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::{Err, IResult};
 
+#[cfg(feature = "serde")]
+use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
+
 use crate::{
     extras, number, Identifier, SemverError, SemverErrorKind, SemverParseError, Version,
     MAX_SAFE_INTEGER,
@@ -331,6 +334,21 @@ impl fmt::Display for Operation {
             LessThan => write!(f, "<"),
             LessThanEquals => write!(f, "<="),
         }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for Range {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for Range {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        s.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -1836,5 +1854,20 @@ mod min_satisfying {
         let result = range.min_satisfying(&versions);
 
         assert_eq!(result, None);
+    }
+}
+
+#[cfg(feature = "serde")]
+#[cfg(test)]
+mod serde_tests {
+    use super::*;
+
+    #[test]
+    fn test_serialize() {
+        let range = Range::parse("~1.2.3").unwrap();
+        let serialized = serde_json::to_string(&range).unwrap();
+        let deserialized: Range = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(range, deserialized);
     }
 }
