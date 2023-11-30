@@ -1,5 +1,12 @@
 # `nodejs-semver` Release Changelog
 
+<a name="3.3.0"></a>
+## 3.3.0 (2023-11-30)
+
+### Features
+
+* **serde:** add optional feature: `serde` ([3842e9af](https://github.com/cijiugechu/nodejs-semver/commit/3842e9af9ae266a672c073063c8765a2f07dbec7)) 
+
 <a name="3.2.0"></a>
 ## 3.2.0 (2023-10-22)
 
