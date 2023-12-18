@@ -6,19 +6,20 @@ use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
 use std::cmp::{self, Ordering};
 use std::fmt;
 use std::num::ParseIntError;
+use winnow::stream::AsChar;
 
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
-use nom::branch::alt;
-use nom::bytes::complete::{tag, take_while1};
-use nom::character::complete::{digit1, space0};
-use nom::character::is_alphanumeric;
-use nom::combinator::{all_consuming, map, map_res, opt, recognize};
-use nom::error::{context, ContextError, ErrorKind, FromExternalError, ParseError};
-use nom::multi::separated_list1;
-use nom::sequence::{preceded, tuple};
-use nom::{Err, IResult};
+use winnow::branch::alt;
+use winnow::bytes::{tag, take_while1};
+use winnow::character::{digit1, space0};
+use winnow::combinator::{all_consuming, opt};
+use winnow::error::ErrMode;
+use winnow::error::{ContextError, ErrorKind, FromExternalError, ParseError};
+use winnow::multi::separated1;
+use winnow::sequence::preceded;
+use winnow::{IResult, Parser};
 
 pub use range::*;
 
@@ -102,7 +103,7 @@ impl SemverError {
     /// Returns the (0-indexed) line and column number where the parsing error
     /// happened.
     pub fn location(&self) -> (usize, usize) {
-        // Taken partially from nom.
+        // Taken partially from winnow.
         let prefix = &self.input.as_bytes()[..self.offset()];
 
         // Count the number of newlines in the first `offset` bytes of input
@@ -202,7 +203,7 @@ struct SemverParseError<I> {
 }
 
 impl<I> ParseError<I> for SemverParseError<I> {
-    fn from_error_kind(input: I, _kind: nom::error::ErrorKind) -> Self {
+    fn from_error_kind(input: I, _kind: winnow::error::ErrorKind) -> Self {
         Self {
             input,
             context: None,
@@ -210,15 +211,22 @@ impl<I> ParseError<I> for SemverParseError<I> {
         }
     }
 
-    fn append(_input: I, _kind: nom::error::ErrorKind, other: Self) -> Self {
-        other
+    fn append(self, input: I, _kind: winnow::error::ErrorKind) -> Self {
+        Self {
+            input,
+            context: self.context,
+            kind: self.kind,
+        }
     }
 }
 
 impl<I> ContextError<I> for SemverParseError<I> {
-    fn add_context(_input: I, ctx: &'static str, mut other: Self) -> Self {
-        other.context = Some(ctx);
-        other
+    fn add_context(self, _input: I, ctx: &'static str) -> Self {
+        Self {
+            input: self.input,
+            context: Some(ctx),
+            kind: self.kind,
+        }
     }
 }
 
@@ -338,7 +346,7 @@ impl Version {
         match all_consuming(version)(input) {
             Ok((_, arg)) => Ok(arg),
             Err(err) => Err(match err {
-                Err::Error(e) | Err::Failure(e) => SemverError {
+                ErrMode::Backtrack(e) | ErrMode::Cut(e) => SemverError {
                     input: input.into(),
                     span: (e.input.as_ptr() as usize - input.as_ptr() as usize, 0).into(),
                     kind: if let Some(kind) = e.kind {
@@ -349,7 +357,7 @@ impl Version {
                         SemverErrorKind::Other
                     },
                 },
-                Err::Incomplete(_) => SemverError {
+                ErrMode::Incomplete(_) => SemverError {
                     input: input.into(),
                     span: (input.len() - 1, 0).into(),
                     kind: SemverErrorKind::IncompleteInput,
@@ -571,98 +579,93 @@ impl Extras {
 ///                 | <version core> "+" <build>
 ///                 | <version core> "-" <pre-release> "+" <build>
 fn version(input: &str) -> IResult<&str, Version, SemverParseError<&str>> {
-    context(
-        "version",
-        map(
-            tuple((opt(alt((tag("v"), tag("V")))), space0, version_core, extras)),
-            |(_, _, (major, minor, patch), (pre_release, build))| Version {
-                major,
-                minor,
-                patch,
-                pre_release,
-                build,
-            },
-        ),
-    )(input)
+    Parser::map(
+        (opt(alt((tag("v"), tag("V")))), space0, version_core, extras),
+        |(_, _, (major, minor, patch), (pre_release, build))| Version {
+            major,
+            minor,
+            patch,
+            pre_release,
+            build,
+        },
+    )
+    .context("version")
+    .parse_next(input)
 }
 
 fn extras(
     input: &str,
 ) -> IResult<&str, (Vec<Identifier>, Vec<Identifier>), SemverParseError<&str>> {
-    map(
+    Parser::map(
         opt(alt((
-            map(tuple((pre_release, build)), Extras::ReleaseAndBuild),
-            map(pre_release, Extras::Release),
-            map(build, Extras::Build),
+            Parser::map((pre_release, build), Extras::ReleaseAndBuild),
+            Parser::map(pre_release, Extras::Release),
+            Parser::map(build, Extras::Build),
         ))),
         |extras| match extras {
             Some(extras) => extras.values(),
             _ => Default::default(),
         },
-    )(input)
+    )
+    .parse_next(input)
 }
 
 /// <version core> ::= <major> "." <minor> "." <patch>
 fn version_core(input: &str) -> IResult<&str, (u64, u64, u64), SemverParseError<&str>> {
-    context(
-        "version core",
-        map(
-            tuple((number, tag("."), number, tag("."), number)),
-            |(major, _, minor, _, patch)| (major, minor, patch),
-        ),
-    )(input)
+    Parser::map(
+        (number, tag("."), number, tag("."), number),
+        |(major, _, minor, _, patch)| (major, minor, patch),
+    )
+    .context("version core")
+    .parse_next(input)
 }
 
 // I believe build, pre_release, and identifier are not 100% spec compliant.
 fn build(input: &str) -> IResult<&str, Vec<Identifier>, SemverParseError<&str>> {
-    context(
-        "build version",
-        preceded(tag("+"), separated_list1(tag("."), identifier)),
-    )(input)
+    preceded(tag("+"), separated1(identifier, tag(".")))
+        .context("build version")
+        .parse_next(input)
 }
 
 fn pre_release(input: &str) -> IResult<&str, Vec<Identifier>, SemverParseError<&str>> {
-    context(
-        "pre_release version",
-        preceded(opt(tag("-")), separated_list1(tag("."), identifier)),
-    )(input)
+    preceded(opt(tag("-")), separated1(identifier, tag(".")))
+        .context("pre_release version")
+        .parse_next(input)
 }
 
 fn identifier(input: &str) -> IResult<&str, Identifier, SemverParseError<&str>> {
-    context(
-        "identifier",
-        map(
-            take_while1(|x: char| is_alphanumeric(x as u8) || x == '-'),
-            |s: &str| {
-                str::parse::<u64>(s)
-                    .map(Identifier::Numeric)
-                    .unwrap_or_else(|_err| Identifier::AlphaNumeric(s.to_string()))
-            },
-        ),
-    )(input)
+    Parser::map(
+        take_while1(|x: char| AsChar::is_alphanum(x as u8) || x == '-'),
+        |s: &str| {
+            str::parse::<u64>(s)
+                .map(Identifier::Numeric)
+                .unwrap_or_else(|_err| Identifier::AlphaNumeric(s.to_string()))
+        },
+    )
+    .context("identifier")
+    .parse_next(input)
 }
 
 pub(crate) fn number(input: &str) -> IResult<&str, u64, SemverParseError<&str>> {
-    context(
-        "number component",
-        map_res(recognize(digit1), |raw| {
-            let value = str::parse(raw).map_err(|e| SemverParseError {
+    Parser::map_res(Parser::recognize(digit1), |raw| {
+        let value = str::parse(raw).map_err(|e| SemverParseError {
+            input,
+            context: None,
+            kind: Some(SemverErrorKind::ParseIntError(e)),
+        })?;
+
+        if value > MAX_SAFE_INTEGER {
+            return Err(SemverParseError {
                 input,
                 context: None,
-                kind: Some(SemverErrorKind::ParseIntError(e)),
-            })?;
+                kind: Some(SemverErrorKind::MaxIntError(value)),
+            });
+        }
 
-            if value > MAX_SAFE_INTEGER {
-                return Err(SemverParseError {
-                    input,
-                    context: None,
-                    kind: Some(SemverErrorKind::MaxIntError(value)),
-                });
-            }
-
-            Ok(value)
-        }),
-    )(input)
+        Ok(value)
+    })
+    .context("number component")
+    .parse_next(input)
 }
 
 #[cfg(test)]
