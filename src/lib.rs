@@ -10,14 +10,13 @@ use std::num::ParseIntError;
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
-use winnow::branch::alt;
-use winnow::bytes::{tag, take_while1};
-use winnow::character::{digit1, space0};
-use winnow::combinator::opt;
-use winnow::error::{ContextError, ErrMode, ErrorKind, FromExternalError, ParseError};
+use winnow::ascii::{digit1, space0};
+use winnow::combinator::{alt, opt};
+use winnow::error::{AddContext, ErrMode, ErrorKind, FromExternalError, ParserError};
 use winnow::multi::separated1;
 use winnow::sequence::preceded;
 use winnow::stream::AsChar;
+use winnow::token::{tag, take_while};
 use winnow::{IResult, Parser};
 
 pub use range::*;
@@ -201,7 +200,7 @@ struct SemverParseError<I> {
     pub(crate) kind: Option<SemverErrorKind>,
 }
 
-impl<I> ParseError<I> for SemverParseError<I> {
+impl<I> ParserError<I> for SemverParseError<I> {
     fn from_error_kind(input: I, _kind: winnow::error::ErrorKind) -> Self {
         Self {
             input,
@@ -219,7 +218,7 @@ impl<I> ParseError<I> for SemverParseError<I> {
     }
 }
 
-impl<I> ContextError<I> for SemverParseError<I> {
+impl<I> AddContext<I> for SemverParseError<I> {
     fn add_context(self, _input: I, ctx: &'static str) -> Self {
         Self {
             input: self.input,
@@ -634,7 +633,7 @@ fn pre_release(input: &str) -> IResult<&str, Vec<Identifier>, SemverParseError<&
 
 fn identifier(input: &str) -> IResult<&str, Identifier, SemverParseError<&str>> {
     Parser::map(
-        take_while1(|x: char| AsChar::is_alphanum(x as u8) || x == '-'),
+        take_while(1.., |x: char| AsChar::is_alphanum(x as u8) || x == '-'),
         |s: &str| {
             str::parse::<u64>(s)
                 .map(Identifier::Numeric)
@@ -646,7 +645,7 @@ fn identifier(input: &str) -> IResult<&str, Identifier, SemverParseError<&str>> 
 }
 
 pub(crate) fn number(input: &str) -> IResult<&str, u64, SemverParseError<&str>> {
-    Parser::map_res(Parser::recognize(digit1), |raw| {
+    Parser::try_map(Parser::recognize(digit1), |raw| {
         let value = str::parse(raw).map_err(|e| SemverParseError {
             input,
             context: None,
