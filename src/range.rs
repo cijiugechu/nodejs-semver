@@ -1,14 +1,12 @@
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::fmt;
 
-use winnow::branch::alt;
-use winnow::bytes::any;
-use winnow::bytes::tag;
-use winnow::character::{space0, space1};
-use winnow::combinator::{eof, opt, peek};
+use winnow::ascii::{space0, space1};
+use winnow::combinator::{alt, eof, opt, peek, repeat_till0};
 use winnow::error::ErrMode;
-use winnow::multi::{many_till0, separated0};
+use winnow::multi::separated0;
 use winnow::sequence::{delimited, preceded, terminated};
+use winnow::token::{any, tag};
 use winnow::{IResult, Parser};
 
 #[cfg(feature = "serde")]
@@ -558,7 +556,7 @@ TODO: add tests for all these
 
 // range-set ::= range ( logical-or range ) *
 fn range_set(input: &str) -> IResult<&str, Range, SemverParseError<&str>> {
-    Parser::map_res(bound_sets, |sets| {
+    Parser::try_map(bound_sets, |sets| {
         if sets.is_empty() {
             Err(SemverParseError {
                 input,
@@ -615,12 +613,13 @@ fn simple(input: &str) -> IResult<&str, Option<BoundSet>, SemverParseError<&str>
         terminated(tilde, peek(alt((space1, tag("||"), eof)))),
         terminated(caret, peek(alt((space1, tag("||"), eof)))),
         garbage,
-    ))(input)
+    ))
+    .parse_next(input)
 }
 
 fn garbage(input: &str) -> IResult<&str, Option<BoundSet>, SemverParseError<&str>> {
     Parser::map(
-        many_till0(any, alt((peek(space1), peek(tag("||")), eof))),
+        repeat_till0(any, alt((peek(space1), peek(tag("||")), eof))),
         |_: ((), &str)| None,
     )
     .parse_next(input)
@@ -774,7 +773,8 @@ fn operation(input: &str) -> IResult<&str, Operation, SemverParseError<&str>> {
         Parser::map(tag("="), |_| Exact),
         Parser::map(tag("<="), |_| LessThanEquals),
         Parser::map(tag("<"), |_| LessThan),
-    ))(input)
+    ))
+    .parse_next(input)
 }
 
 fn partial(input: &str) -> IResult<&str, Option<BoundSet>, SemverParseError<&str>> {
@@ -841,11 +841,11 @@ impl From<Partial> for Version {
 // nr      ::= '0' | ['1'-'9'] ( ['0'-'9'] ) *
 // NOTE: Loose mode means nr is actually just `['0'-'9']`.
 fn partial_version(input: &str) -> IResult<&str, Partial, SemverParseError<&str>> {
-    let (input, _) = opt(tag("v"))(input)?;
+    let (input, _) = opt(tag("v")).parse_next(input)?;
     let (input, _) = space0(input)?;
     let (input, major) = component(input)?;
-    let (input, minor) = opt(preceded(tag("."), component))(input)?;
-    let (input, patch) = opt(preceded(tag("."), component))(input)?;
+    let (input, minor) = opt(preceded(tag("."), component)).parse_next(input)?;
+    let (input, patch) = opt(preceded(tag("."), component)).parse_next(input)?;
     let (input, (pre, build)) = if patch.is_some() {
         extras(input)?
     } else {
@@ -867,7 +867,8 @@ fn component(input: &str) -> IResult<&str, Option<u64>, SemverParseError<&str>> 
     alt((
         Parser::map(x_or_asterisk, |_| None),
         Parser::map(number, Some),
-    ))(input)
+    ))
+    .parse_next(input)
 }
 
 fn x_or_asterisk(input: &str) -> IResult<&str, (), SemverParseError<&str>> {
@@ -1032,9 +1033,9 @@ fn caret(input: &str) -> IResult<&str, Option<BoundSet>, SemverParseError<&str>>
 // hyphen ::= ' - ' partial /* loose */ | partial ' - ' partial
 fn hyphen(input: &str) -> IResult<&str, Option<BoundSet>, SemverParseError<&str>> {
     let parser = |input| {
-        let (input, lower) = opt(partial_version)(input)?;
+        let (input, lower) = opt(partial_version).parse_next(input)?;
         let (input, _) = space1(input)?;
-        let (input, _) = tag("-")(input)?;
+        let (input, _) = tag("-").parse_next(input)?;
         let (input, _) = space1(input)?;
         let (input, upper) = partial_version(input)?;
         let upper = match upper {
