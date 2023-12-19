@@ -6,7 +6,6 @@ use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
 use std::cmp::{self, Ordering};
 use std::fmt;
 use std::num::ParseIntError;
-use winnow::stream::AsChar;
 
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
@@ -14,11 +13,11 @@ use thiserror::Error;
 use winnow::branch::alt;
 use winnow::bytes::{tag, take_while1};
 use winnow::character::{digit1, space0};
-use winnow::combinator::{all_consuming, opt};
-use winnow::error::ErrMode;
-use winnow::error::{ContextError, ErrorKind, FromExternalError, ParseError};
+use winnow::combinator::opt;
+use winnow::error::{ContextError, ErrMode, ErrorKind, FromExternalError, ParseError};
 use winnow::multi::separated1;
 use winnow::sequence::preceded;
+use winnow::stream::AsChar;
 use winnow::{IResult, Parser};
 
 pub use range::*;
@@ -343,7 +342,7 @@ impl Version {
             });
         }
 
-        match all_consuming(version)(input) {
+        match version.parse_next(input) {
             Ok((_, arg)) => Ok(arg),
             Err(err) => Err(match err {
                 ErrMode::Backtrack(e) | ErrMode::Cut(e) => SemverError {
