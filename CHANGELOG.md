@@ -1,5 +1,12 @@
 # `nodejs-semver` Release Changelog
 
+<a name="3.3.1"></a>
+## 3.3.1 (2023-12-19)
+
+### Performance
+
+* **winnow:** migrate to `winnow` ([#3](https://github.com/cijiugechu/nodejs-semver/pull/3)) 
+
 <a name="3.3.0"></a>
 ## 3.3.0 (2023-11-30)
 
