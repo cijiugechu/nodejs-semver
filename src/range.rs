@@ -496,6 +496,43 @@ impl Range {
 
         filtered.into_iter().min()
     }
+
+    /**
+    Return the lowest [Version] that can possibly match the given range.
+    */
+    pub fn min_version(&self) -> Option<Version> {
+        if let Some(min_bound) = self.0.iter().map(|range| &range.lower).min() {
+            match min_bound {
+                Bound::Lower(pred) => match pred {
+                    Predicate::Including(v) => Some(v.clone()),
+                    Predicate::Excluding(v) => {
+                        let mut v = v.clone();
+                        if v.is_prerelease() {
+                            v.pre_release.push(Identifier::Numeric(0))
+                        } else {
+                            v.patch += 1;
+                        }
+                        Some(v)
+                    }
+                    Predicate::Unbounded => {
+                        let mut zero = Version::from((0, 0, 0));
+                        if self.satisfies(&zero) {
+                            return Some(zero);
+                        }
+
+                        zero.pre_release.push(Identifier::Numeric(0));
+                        if self.satisfies(&zero) {
+                            return Some(zero);
+                        }
+                        None
+                    }
+                },
+                Bound::Upper(_) => None,
+            }
+        } else {
+            None
+        }
+    }
 }
 
 impl fmt::Display for Range {
@@ -1861,6 +1898,80 @@ mod min_satisfying {
         let result = range.min_satisfying(&versions);
 
         assert_eq!(result, None);
+    }
+}
+
+#[cfg(test)]
+mod min_version {
+    use super::*;
+
+    #[test]
+    fn min_version_test() {
+        // [range, minimum]
+        let tests = vec![
+            // Stars
+            ("*", Some("0.0.0")),
+            ("* || >=2", Some("0.0.0")),
+            (">=2 || *", Some("0.0.0")),
+            (">2 || *", Some("0.0.0")),
+            // equal
+            ("1.0.0", Some("1.0.0")),
+            ("1.0", Some("1.0.0")),
+            ("1.0.x", Some("1.0.0")),
+            ("1.0.*", Some("1.0.0")),
+            ("1", Some("1.0.0")),
+            ("1.x.x", Some("1.0.0")),
+            ("1.x.x", Some("1.0.0")),
+            ("1.*.x", Some("1.0.0")),
+            ("1.x.*", Some("1.0.0")),
+            ("1.x", Some("1.0.0")),
+            ("1.*", Some("1.0.0")),
+            ("=1.0.0", Some("1.0.0")),
+            // Tilde
+            ("~1.1.1", Some("1.1.1")),
+            ("~1.1.1-beta", Some("1.1.1-beta")),
+            ("~1.1.1 || >=2", Some("1.1.1")),
+            // Carot
+            ("^1.1.1", Some("1.1.1")),
+            ("^1.1.1-beta", Some("1.1.1-beta")),
+            ("^1.1.1 || >=2", Some("1.1.1")),
+            ("^2.16.2 ^2.16", Some("2.16.2")),
+            // "-" operator
+            ("1.1.1 - 1.8.0", Some("1.1.1")),
+            ("1.1 - 1.8.0", Some("1.1.0")),
+            // Less / less or equal
+            ("<2", Some("0.0.0")),
+            ("<0.0.0-beta", Some("0.0.0-0")),
+            ("<0.0.1-beta", Some("0.0.0")),
+            ("<2 || >4", Some("0.0.0")),
+            (">4 || <2", Some("0.0.0")),
+            ("<=2 || >=4", Some("0.0.0")),
+            (">=4 || <=2", Some("0.0.0")),
+            ("<0.0.0-beta >0.0.0-alpha", Some("0.0.0-alpha.0")),
+            (">0.0.0-alpha <0.0.0-beta", Some("0.0.0-alpha.0")),
+            // Greater than or equal
+            (">=1.1.1 <2 || >=2.2.2 <3", Some("1.1.1")),
+            (">=2.2.2 <3 || >=1.1.1 <2", Some("1.1.1")),
+            // Greater than but not equal
+            (">1.0.0", Some("1.0.1")),
+            (">1.0.0-0", Some("1.0.0-0.0")),
+            (">1.0.0-beta", Some("1.0.0-beta.0")),
+            (">2 || >1.0.0", Some("1.0.1")),
+            (">2 || >1.0.0-0", Some("1.0.0-0.0")),
+            (">2 || >1.0.0-beta", Some("1.0.0-beta.0")),
+        ];
+
+        for (range, version) in tests {
+            let parsed_range = Range::parse(range).unwrap();
+            let parsed_version = version.map(|v| Version::parse(v).unwrap());
+            assert_eq!(
+                parsed_range.min_version(),
+                parsed_version,
+                "expected min_version of {:?} to be {:?}",
+                range,
+                version
+            );
+        }
     }
 }
 
