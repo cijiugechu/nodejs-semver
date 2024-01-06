@@ -26,3 +26,9 @@ let range: Range = "^1.2".parse().unwrap();
 
 assert!(version.satisfies(&range));
 ```
+
+## Optional Features
+
+The following are a list of [Cargo features](https://doc.rust-lang.org/stable/cargo/reference/features.html#the-features-section) that can be enabled:
+
+- **serde**: Provides serialization and deserialization for [Version] and [Range]. 

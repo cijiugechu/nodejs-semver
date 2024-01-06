@@ -22,6 +22,7 @@ serde = { version = "1.0.190", features = ["derive"], optional = true }
 pretty_assertions = "1.4.0"
 criterion         = {  version = "0.5.1", features = ["html_reports"] }
 serde_json        = "1.0"
+serde = { version = "1.0.190", features = ["derive"] }
 
 [features]
 default = []
@@ -30,3 +31,8 @@ serde = ["dep:serde"]
 [[bench]]
 name = "parser"
 harness = false
+
+[[example]]
+name = "serde"
+path = "examples/serde.rs"
+required-features = ["serde"]
