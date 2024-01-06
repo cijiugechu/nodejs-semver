@@ -1,5 +1,12 @@
 # `nodejs-semver` Release Changelog
 
+<a name="3.4.0"></a>
+## 3.4.0 (2024-01-06)
+
+### Features
+
+* **range:** add `min_version` ([14ab733](https://github.com/cijiugechu/nodejs-semver/commit/14ab73317ff2de3bd565e65c2ef5c07f8137f8bb)) 
+
 <a name="3.3.1"></a>
 ## 3.3.1 (2023-12-19)
 
