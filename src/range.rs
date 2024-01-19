@@ -667,139 +667,132 @@ fn primitive(input: &str) -> IResult<&str, Option<BoundSet>, SemverParseError<&s
     use Operation::*;
 
     Parser::map(
-            (operation, preceded(space0, partial_version)),
-            |parsed| {
-                match parsed {
-                (GreaterThanEquals, partial) => {
-                    BoundSet::at_least(Predicate::Including(partial.into()))
-                }
-                (
-                    GreaterThan,
-                    Partial {
-                        major: Some(major),
-                        minor: Some(minor),
-                        patch: None,
-                        ..
-                    },
-                ) => BoundSet::at_least(Predicate::Including((major, minor + 1, 0).into())),
-                (
-                    GreaterThan,
-                    Partial {
-                        major: Some(major),
-                        minor: None,
-                        patch: None,
-                        ..
-                    },
-                ) => BoundSet::at_least(Predicate::Including((major + 1, 0, 0).into())),
-                (GreaterThan, partial) => BoundSet::at_least(Predicate::Excluding(partial.into())),
-                (
-                    LessThan,
-                    Partial {
-                        major: Some(major),
-                        minor: Some(minor),
-                        patch: None,
-                        ..
-                    },
-                ) => BoundSet::at_most(Predicate::Excluding((major, minor, 0, 0).into())),
-                (
-                    LessThan,
-                    Partial {
-                        major,
-                        minor,
-                        patch,
-                        pre_release,
-                        build,
-                        ..
-                    },
-                ) => BoundSet::at_most(Predicate::Excluding(Version {
-                    major: major.unwrap_or(0),
-                    minor: minor.unwrap_or(0),
-                    patch: patch.unwrap_or(0),
-                    build,
-                    pre_release,
-                })),
-                (
-                    LessThanEquals,
-                    Partial {
-                        major,
-                        minor: None,
-                        patch: None,
-                        ..
-                    },
-                ) => BoundSet::at_most(Predicate::Including(
-                    (major.unwrap_or(0), MAX_SAFE_INTEGER, MAX_SAFE_INTEGER).into(),
-                )),
-                (
-                    LessThanEquals,
-                    Partial {
-                        major,
-                        minor,
-                        patch: None,
-                        ..
-                    },
-                ) => BoundSet::at_most(Predicate::Including(
-                    (major.unwrap_or(0), minor.unwrap_or(0), MAX_SAFE_INTEGER).into(),
-                )),
-                (LessThanEquals, partial) => {
-                    BoundSet::at_most(Predicate::Including(partial.into()))
-                }
-                (
-                    Exact,
-                    Partial {
-                        major: Some(major),
-                        minor: Some(minor),
-                        patch: Some(patch),
-                        pre_release,
-                        ..
-                    },
-                ) => BoundSet::exact( Version {
+        (operation, preceded(space0, partial_version)),
+        |parsed| match parsed {
+            (GreaterThanEquals, partial) => {
+                BoundSet::at_least(Predicate::Including(partial.into()))
+            }
+            (
+                GreaterThan,
+                Partial {
+                    major: Some(major),
+                    minor: Some(minor),
+                    patch: None,
+                    ..
+                },
+            ) => BoundSet::at_least(Predicate::Including((major, minor + 1, 0).into())),
+            (
+                GreaterThan,
+                Partial {
+                    major: Some(major),
+                    minor: None,
+                    patch: None,
+                    ..
+                },
+            ) => BoundSet::at_least(Predicate::Including((major + 1, 0, 0).into())),
+            (GreaterThan, partial) => BoundSet::at_least(Predicate::Excluding(partial.into())),
+            (
+                LessThan,
+                Partial {
+                    major: Some(major),
+                    minor: Some(minor),
+                    patch: None,
+                    ..
+                },
+            ) => BoundSet::at_most(Predicate::Excluding((major, minor, 0, 0).into())),
+            (
+                LessThan,
+                Partial {
                     major,
                     minor,
                     patch,
                     pre_release,
+                    build,
+                    ..
+                },
+            ) => BoundSet::at_most(Predicate::Excluding(Version {
+                major: major.unwrap_or(0),
+                minor: minor.unwrap_or(0),
+                patch: patch.unwrap_or(0),
+                build,
+                pre_release,
+            })),
+            (
+                LessThanEquals,
+                Partial {
+                    major,
+                    minor: None,
+                    patch: None,
+                    ..
+                },
+            ) => BoundSet::at_most(Predicate::Including(
+                (major.unwrap_or(0), MAX_SAFE_INTEGER, MAX_SAFE_INTEGER).into(),
+            )),
+            (
+                LessThanEquals,
+                Partial {
+                    major,
+                    minor,
+                    patch: None,
+                    ..
+                },
+            ) => BoundSet::at_most(Predicate::Including(
+                (major.unwrap_or(0), minor.unwrap_or(0), MAX_SAFE_INTEGER).into(),
+            )),
+            (LessThanEquals, partial) => BoundSet::at_most(Predicate::Including(partial.into())),
+            (
+                Exact,
+                Partial {
+                    major: Some(major),
+                    minor: Some(minor),
+                    patch: Some(patch),
+                    pre_release,
+                    ..
+                },
+            ) => BoundSet::exact(Version {
+                major,
+                minor,
+                patch,
+                pre_release,
+                build: vec![],
+            }),
+            (
+                Exact,
+                Partial {
+                    major: Some(major),
+                    minor: Some(minor),
+                    ..
+                },
+            ) => BoundSet::new(
+                Bound::Lower(Predicate::Including((major, minor, 0).into())),
+                Bound::Upper(Predicate::Excluding(Version {
+                    major,
+                    minor: minor + 1,
+                    patch: 0,
+                    pre_release: vec![Identifier::Numeric(0)],
                     build: vec![],
-                }),
-                (
-                    Exact,
-                    Partial {
-                        major: Some(major),
-                        minor: Some(minor),
-                        ..
-                    },
-                ) => BoundSet::new(
-                    Bound::Lower(Predicate::Including(
-                        (major, minor, 0).into(),
-                    )),
-                    Bound::Upper(Predicate::Excluding(Version {
-                        major,
-                        minor: minor + 1,
-                        patch: 0,
-                        pre_release: vec![Identifier::Numeric(0)],
-                        build: vec![],
-                    })),
-                ),
-                (
-                    Exact,
-                    Partial {
-                        major: Some(major),
-                        ..
-                    },
-                ) => BoundSet::new(
-                    Bound::Lower(Predicate::Including(
-                        (major, 0, 0).into(),
-                    )),
-                    Bound::Upper(Predicate::Excluding(Version {
-                        major: major + 1,
-                        minor: 0,
-                        patch: 0,
-                        pre_release: vec![Identifier::Numeric(0)],
-                        build: vec![],
-                    })),
-                ),
-                _ => unreachable!("Failed to parse operation. This should not happen and should be reported as a bug, while parsing {}", input),
-            }
-            },
-        ).context("operation range (ex: >= 1.2.3)").parse_next(input)
+                })),
+            ),
+            (
+                Exact,
+                Partial {
+                    major: Some(major), ..
+                },
+            ) => BoundSet::new(
+                Bound::Lower(Predicate::Including((major, 0, 0).into())),
+                Bound::Upper(Predicate::Excluding(Version {
+                    major: major + 1,
+                    minor: 0,
+                    patch: 0,
+                    pre_release: vec![Identifier::Numeric(0)],
+                    build: vec![],
+                })),
+            ),
+            _ => None,
+        },
+    )
+    .context("operation range (ex: >= 1.2.3)")
+    .parse_next(input)
 }
 
 fn operation(input: &str) -> IResult<&str, Operation, SemverParseError<&str>> {
@@ -996,7 +989,7 @@ fn tilde(input: &str) -> IResult<&str, Option<BoundSet>, SemverParseError<&str>>
             Bound::Lower(Predicate::Including((major, 0, 0).into())),
             Bound::Upper(Predicate::Excluding((major + 1, 0, 0, 0).into())),
         ),
-        _ => unreachable!("This should not have parsed: {}", input),
+        _ => None,
     })
     .context("tilde version range (ex: ~1.2.3)")
     .parse_next(input)
