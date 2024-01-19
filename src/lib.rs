@@ -11,13 +11,11 @@ use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use winnow::ascii::{digit1, space0};
-use winnow::combinator::{alt, opt};
+use winnow::combinator::{alt, opt, preceded, separated};
 use winnow::error::{AddContext, ErrMode, ErrorKind, FromExternalError, ParserError};
-use winnow::multi::separated1;
-use winnow::sequence::preceded;
 use winnow::stream::AsChar;
 use winnow::token::{tag, take_while};
-use winnow::{IResult, Parser};
+use winnow::{PResult, Parser};
 
 pub use range::*;
 
@@ -200,18 +198,18 @@ struct SemverParseError<I> {
     pub(crate) kind: Option<SemverErrorKind>,
 }
 
-impl<I> ParserError<I> for SemverParseError<I> {
-    fn from_error_kind(input: I, _kind: winnow::error::ErrorKind) -> Self {
+impl<I: Clone> ParserError<I> for SemverParseError<I> {
+    fn from_error_kind(input: &I, _kind: winnow::error::ErrorKind) -> Self {
         Self {
-            input,
+            input: input.clone(),
             context: None,
             kind: None,
         }
     }
 
-    fn append(self, input: I, _kind: winnow::error::ErrorKind) -> Self {
+    fn append(self, input: &I, _kind: winnow::error::ErrorKind) -> Self {
         Self {
-            input,
+            input: input.clone(),
             context: self.context,
             kind: self.kind,
         }
@@ -219,7 +217,7 @@ impl<I> ParserError<I> for SemverParseError<I> {
 }
 
 impl<I> AddContext<I> for SemverParseError<I> {
-    fn add_context(self, _input: I, ctx: &'static str) -> Self {
+    fn add_context(self, _input: &I, ctx: &'static str) -> Self {
         Self {
             input: self.input,
             context: Some(ctx),
@@ -230,7 +228,7 @@ impl<I> AddContext<I> for SemverParseError<I> {
 
 impl<'a> FromExternalError<&'a str, SemverParseError<&'a str>> for SemverParseError<&'a str> {
     fn from_external_error(
-        _input: &'a str,
+        _input: &&'a str,
         _kind: ErrorKind,
         e: SemverParseError<&'a str>,
     ) -> Self {
@@ -331,7 +329,7 @@ impl Version {
     #[doc = include_str!("../examples/parse.rs")]
     /// ```
     pub fn parse<S: AsRef<str>>(input: S) -> Result<Version, SemverError> {
-        let input = input.as_ref();
+        let mut input = input.as_ref();
 
         if input.len() > MAX_LENGTH {
             return Err(SemverError {
@@ -341,8 +339,8 @@ impl Version {
             });
         }
 
-        match version.parse_next(input) {
-            Ok((_, arg)) => Ok(arg),
+        match version.parse_next(&mut input) {
+            Ok(arg) => Ok(arg),
             Err(err) => Err(match err {
                 ErrMode::Backtrack(e) | ErrMode::Cut(e) => SemverError {
                     input: input.into(),
@@ -576,24 +574,24 @@ impl Extras {
 ///                 | <version core> "-" <pre-release>
 ///                 | <version core> "+" <build>
 ///                 | <version core> "-" <pre-release> "+" <build>
-fn version(input: &str) -> IResult<&str, Version, SemverParseError<&str>> {
-    Parser::map(
-        (opt(alt((tag("v"), tag("V")))), space0, version_core, extras),
-        |(_, _, (major, minor, patch), (pre_release, build))| Version {
-            major,
-            minor,
-            patch,
-            pre_release,
-            build,
-        },
-    )
-    .context("version")
-    .parse_next(input)
+fn version<'s>(input: &mut &'s str) -> PResult<Version, SemverParseError<&'s str>> {
+    (opt(alt((tag("v"), tag("V")))), space0, version_core, extras)
+        .map(
+            |(_, _, (major, minor, patch), (pre_release, build))| Version {
+                major,
+                minor,
+                patch,
+                pre_release,
+                build,
+            },
+        )
+        .context("version")
+        .parse_next(input)
 }
 
-fn extras(
-    input: &str,
-) -> IResult<&str, (Vec<Identifier>, Vec<Identifier>), SemverParseError<&str>> {
+fn extras<'s>(
+    input: &mut &'s str,
+) -> PResult<(Vec<Identifier>, Vec<Identifier>), SemverParseError<&'s str>> {
     Parser::map(
         opt(alt((
             Parser::map((pre_release, build), Extras::ReleaseAndBuild),
@@ -609,29 +607,27 @@ fn extras(
 }
 
 /// <version core> ::= <major> "." <minor> "." <patch>
-fn version_core(input: &str) -> IResult<&str, (u64, u64, u64), SemverParseError<&str>> {
-    Parser::map(
-        (number, tag("."), number, tag("."), number),
-        |(major, _, minor, _, patch)| (major, minor, patch),
-    )
-    .context("version core")
-    .parse_next(input)
+fn version_core<'s>(input: &mut &'s str) -> PResult<(u64, u64, u64), SemverParseError<&'s str>> {
+    (number, tag("."), number, tag("."), number)
+        .map(|(major, _, minor, _, patch)| (major, minor, patch))
+        .context("version core")
+        .parse_next(input)
 }
 
 // I believe build, pre_release, and identifier are not 100% spec compliant.
-fn build(input: &str) -> IResult<&str, Vec<Identifier>, SemverParseError<&str>> {
-    preceded(tag("+"), separated1(identifier, tag(".")))
+fn build<'s>(input: &mut &'s str) -> PResult<Vec<Identifier>, SemverParseError<&'s str>> {
+    preceded(tag("+"), separated(1.., identifier, tag(".")))
         .context("build version")
         .parse_next(input)
 }
 
-fn pre_release(input: &str) -> IResult<&str, Vec<Identifier>, SemverParseError<&str>> {
-    preceded(opt(tag("-")), separated1(identifier, tag(".")))
+fn pre_release<'s>(input: &mut &'s str) -> PResult<Vec<Identifier>, SemverParseError<&'s str>> {
+    preceded(opt(tag("-")), separated(1.., identifier, tag(".")))
         .context("pre_release version")
         .parse_next(input)
 }
 
-fn identifier(input: &str) -> IResult<&str, Identifier, SemverParseError<&str>> {
+fn identifier<'s>(input: &mut &'s str) -> PResult<Identifier, SemverParseError<&'s str>> {
     Parser::map(
         take_while(1.., |x: char| AsChar::is_alphanum(x as u8) || x == '-'),
         |s: &str| {
@@ -644,17 +640,19 @@ fn identifier(input: &str) -> IResult<&str, Identifier, SemverParseError<&str>> 
     .parse_next(input)
 }
 
-pub(crate) fn number(input: &str) -> IResult<&str, u64, SemverParseError<&str>> {
+pub(crate) fn number<'s>(input: &mut &'s str) -> PResult<u64, SemverParseError<&'s str>> {
+    let copied = input.clone();
+
     Parser::try_map(Parser::recognize(digit1), |raw| {
         let value = str::parse(raw).map_err(|e| SemverParseError {
-            input,
+            input: copied,
             context: None,
             kind: Some(SemverErrorKind::ParseIntError(e)),
         })?;
 
         if value > MAX_SAFE_INTEGER {
             return Err(SemverParseError {
-                input,
+                input: copied,
                 context: None,
                 kind: Some(SemverErrorKind::MaxIntError(value)),
             });
