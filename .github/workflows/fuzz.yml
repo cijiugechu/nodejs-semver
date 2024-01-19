@@ -1,0 +1,25 @@
+name: Fuzz
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0' # Run everyweek
+
+jobs:
+  fuzz:
+    name: Cargo Fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+
+      - name: Nightly
+        run: rustup default nightly
+
+      - name: Run Fuzzer
+        run: cargo +nightly fuzz run semver -- -only_ascii=1 -max_total_time=120 -max_len=30
