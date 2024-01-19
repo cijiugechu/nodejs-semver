@@ -1,9 +1,6 @@
 name: Fuzz
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * 0' # Run everyweek
+on: [push, pull_request]
 
 jobs:
   fuzz:
