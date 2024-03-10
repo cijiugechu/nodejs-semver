@@ -990,7 +990,7 @@ fn tilde<'s>(input: &mut &'s str) -> PResult<Option<BoundSet>, SemverParseError<
             Bound::Lower(Predicate::Including((major, 0, 0).into())),
             Bound::Upper(Predicate::Excluding((major + 1, 0, 0, 0).into())),
         ),
-        _ => unreachable!("This should not have parsed"),
+        _ => None,
     })
     .context("tilde version range (ex: ~1.2.3)")
     .parse_next(input)
