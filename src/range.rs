@@ -3,10 +3,10 @@ use std::fmt;
 
 use winnow::ascii::{space0, space1};
 use winnow::combinator::{
-    alt, delimited, eof, opt, peek, preceded, repeat_till0, separated, terminated,
+    alt, delimited, eof, opt, peek, preceded, repeat_till, separated, terminated,
 };
 use winnow::error::ErrMode;
-use winnow::token::{any, tag};
+use winnow::token::{any, literal};
 use winnow::{PResult, Parser};
 
 #[cfg(feature = "serde")]
@@ -616,7 +616,7 @@ fn bound_sets<'s>(input: &mut &'s str) -> PResult<Vec<BoundSet>, SemverParseErro
     .parse_next(input)
 }
 fn logical_or<'s>(input: &mut &'s str) -> PResult<(), SemverParseError<&'s str>> {
-    Parser::map(delimited(space0, tag("||"), space0), |_| ()).parse_next(input)
+    Parser::map(delimited(space0, literal("||"), space0), |_| ()).parse_next(input)
 }
 
 fn range<'s>(input: &mut &'s str) -> PResult<Vec<BoundSet>, SemverParseError<&'s str>> {
@@ -648,11 +648,11 @@ fn range<'s>(input: &mut &'s str) -> PResult<Vec<BoundSet>, SemverParseError<&'s
 // simple ::= primitive | partial | tilde | caret | garbage
 fn simple<'s>(input: &mut &'s str) -> PResult<Option<BoundSet>, SemverParseError<&'s str>> {
     alt((
-        terminated(hyphen, peek(alt((space1, tag("||"), eof)))),
-        terminated(primitive, peek(alt((space1, tag("||"), eof)))),
-        terminated(partial, peek(alt((space1, tag("||"), eof)))),
-        terminated(tilde, peek(alt((space1, tag("||"), eof)))),
-        terminated(caret, peek(alt((space1, tag("||"), eof)))),
+        terminated(hyphen, peek(alt((space1, literal("||"), eof)))),
+        terminated(primitive, peek(alt((space1, literal("||"), eof)))),
+        terminated(partial, peek(alt((space1, literal("||"), eof)))),
+        terminated(tilde, peek(alt((space1, literal("||"), eof)))),
+        terminated(caret, peek(alt((space1, literal("||"), eof)))),
         garbage,
     ))
     .parse_next(input)
@@ -660,7 +660,7 @@ fn simple<'s>(input: &mut &'s str) -> PResult<Option<BoundSet>, SemverParseError
 
 fn garbage<'s>(input: &mut &'s str) -> PResult<Option<BoundSet>, SemverParseError<&'s str>> {
     Parser::map(
-        repeat_till0(any, alt((peek(space1), peek(tag("||")), eof))),
+        repeat_till(0.., any, alt((peek(space1), peek(literal("||")), eof))),
         |_: ((), &str)| None,
     )
     .parse_next(input)
@@ -802,11 +802,11 @@ fn primitive<'s>(input: &mut &'s str) -> PResult<Option<BoundSet>, SemverParseEr
 fn operation<'s>(input: &mut &'s str) -> PResult<Operation, SemverParseError<&'s str>> {
     use Operation::*;
     alt((
-        Parser::map(tag(">="), |_| GreaterThanEquals),
-        Parser::map(tag(">"), |_| GreaterThan),
-        Parser::map(tag("="), |_| Exact),
-        Parser::map(tag("<="), |_| LessThanEquals),
-        Parser::map(tag("<"), |_| LessThan),
+        Parser::map(literal(">="), |_| GreaterThanEquals),
+        Parser::map(literal(">"), |_| GreaterThan),
+        Parser::map(literal("="), |_| Exact),
+        Parser::map(literal("<="), |_| LessThanEquals),
+        Parser::map(literal("<"), |_| LessThan),
     ))
     .parse_next(input)
 }
@@ -875,11 +875,11 @@ impl From<Partial> for Version {
 // nr      ::= '0' | ['1'-'9'] ( ['0'-'9'] ) *
 // NOTE: Loose mode means nr is actually just `['0'-'9']`.
 fn partial_version<'s>(input: &mut &'s str) -> PResult<Partial, SemverParseError<&'s str>> {
-    let _ = opt(tag("v")).parse_next(input)?;
+    let _ = opt(literal("v")).parse_next(input)?;
     let _ = space0(input)?;
     let major = component(input)?;
-    let minor = opt(preceded(tag("."), component)).parse_next(input)?;
-    let patch = opt(preceded(tag("."), component)).parse_next(input)?;
+    let minor = opt(preceded(literal("."), component)).parse_next(input)?;
+    let patch = opt(preceded(literal("."), component)).parse_next(input)?;
     let (pre, build) = if patch.is_some() {
         extras(input)?
     } else {
@@ -903,12 +903,12 @@ fn component<'s>(input: &mut &'s str) -> PResult<Option<u64>, SemverParseError<&
 }
 
 fn x_or_asterisk<'s>(input: &mut &'s str) -> PResult<(), SemverParseError<&'s str>> {
-    Parser::map(alt((tag("x"), tag("X"), tag("*"))), |_| ()).parse_next(input)
+    Parser::map(alt((literal("x"), literal("X"), literal("*"))), |_| ()).parse_next(input)
 }
 
 fn tilde_gt<'s>(input: &mut &'s str) -> PResult<Option<&'s str>, SemverParseError<&'s str>> {
     Parser::map(
-        (tag("~"), space0, opt(tag(">")), space0),
+        (literal("~"), space0, opt(literal(">")), space0),
         |(_, _, gt, _)| gt,
     )
     .parse_next(input)
@@ -998,7 +998,7 @@ fn tilde<'s>(input: &mut &'s str) -> PResult<Option<BoundSet>, SemverParseError<
 
 fn caret<'s>(input: &mut &'s str) -> PResult<Option<BoundSet>, SemverParseError<&'s str>> {
     Parser::map(
-        preceded((tag("^"), space0), partial_version),
+        preceded((literal("^"), space0), partial_version),
         |parsed| match parsed {
             Partial {
                 major: Some(0),
@@ -1066,7 +1066,7 @@ fn hyphen<'s>(input: &mut &'s str) -> PResult<Option<BoundSet>, SemverParseError
     fn parser<'s>(input: &mut &'s str) -> PResult<Option<BoundSet>, SemverParseError<&'s str>> {
         let lower = opt(partial_version).parse_next(input)?;
         let _ = space1(input)?;
-        let _ = tag("-").parse_next(input)?;
+        let _ = literal("-").parse_next(input)?;
         let _ = space1(input)?;
         let upper = partial_version(input)?;
         let upper = match upper {

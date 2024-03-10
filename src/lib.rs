@@ -14,7 +14,7 @@ use winnow::ascii::{digit1, space0};
 use winnow::combinator::{alt, opt, preceded, separated};
 use winnow::error::{AddContext, ErrMode, ErrorKind, FromExternalError, ParserError};
 use winnow::stream::AsChar;
-use winnow::token::{tag, take_while};
+use winnow::token::{literal, take_while};
 use winnow::{PResult, Parser};
 
 pub use range::*;
@@ -575,7 +575,12 @@ impl Extras {
 ///                 | <version core> "+" <build>
 ///                 | <version core> "-" <pre-release> "+" <build>
 fn version<'s>(input: &mut &'s str) -> PResult<Version, SemverParseError<&'s str>> {
-    (opt(alt((tag("v"), tag("V")))), space0, version_core, extras)
+    (
+        opt(alt((literal("v"), literal("V")))),
+        space0,
+        version_core,
+        extras,
+    )
         .map(
             |(_, _, (major, minor, patch), (pre_release, build))| Version {
                 major,
@@ -608,7 +613,7 @@ fn extras<'s>(
 
 /// <version core> ::= <major> "." <minor> "." <patch>
 fn version_core<'s>(input: &mut &'s str) -> PResult<(u64, u64, u64), SemverParseError<&'s str>> {
-    (number, tag("."), number, tag("."), number)
+    (number, literal("."), number, literal("."), number)
         .map(|(major, _, minor, _, patch)| (major, minor, patch))
         .context("version core")
         .parse_next(input)
@@ -616,13 +621,13 @@ fn version_core<'s>(input: &mut &'s str) -> PResult<(u64, u64, u64), SemverParse
 
 // I believe build, pre_release, and identifier are not 100% spec compliant.
 fn build<'s>(input: &mut &'s str) -> PResult<Vec<Identifier>, SemverParseError<&'s str>> {
-    preceded(tag("+"), separated(1.., identifier, tag(".")))
+    preceded(literal("+"), separated(1.., identifier, literal(".")))
         .context("build version")
         .parse_next(input)
 }
 
 fn pre_release<'s>(input: &mut &'s str) -> PResult<Vec<Identifier>, SemverParseError<&'s str>> {
-    preceded(opt(tag("-")), separated(1.., identifier, tag(".")))
+    preceded(opt(literal("-")), separated(1.., identifier, literal(".")))
         .context("pre_release version")
         .parse_next(input)
 }
@@ -641,6 +646,7 @@ fn identifier<'s>(input: &mut &'s str) -> PResult<Identifier, SemverParseError<&
 }
 
 pub(crate) fn number<'s>(input: &mut &'s str) -> PResult<u64, SemverParseError<&'s str>> {
+    #[allow(suspicious_double_ref_op)]
     let copied = input.clone();
 
     Parser::try_map(Parser::recognize(digit1), |raw| {
