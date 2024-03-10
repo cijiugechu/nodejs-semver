@@ -13,7 +13,7 @@ use thiserror::Error;
 use winnow::ascii::{digit1, space0};
 use winnow::combinator::{alt, opt, preceded, separated};
 use winnow::error::{AddContext, ErrMode, ErrorKind, FromExternalError, ParserError};
-use winnow::stream::AsChar;
+use winnow::stream::{AsChar, Stream};
 use winnow::token::{literal, take_while};
 use winnow::{PResult, Parser};
 
@@ -198,7 +198,7 @@ struct SemverParseError<I> {
     pub(crate) kind: Option<SemverErrorKind>,
 }
 
-impl<I: Clone> ParserError<I> for SemverParseError<I> {
+impl<I: Clone + Stream> ParserError<I> for SemverParseError<I> {
     fn from_error_kind(input: &I, _kind: winnow::error::ErrorKind) -> Self {
         Self {
             input: input.clone(),
@@ -207,7 +207,12 @@ impl<I: Clone> ParserError<I> for SemverParseError<I> {
         }
     }
 
-    fn append(self, input: &I, _kind: winnow::error::ErrorKind) -> Self {
+    fn append(
+        self,
+        input: &I,
+        _token_start: &<I as Stream>::Checkpoint,
+        _kind: winnow::error::ErrorKind,
+    ) -> Self {
         Self {
             input: input.clone(),
             context: self.context,
@@ -216,8 +221,13 @@ impl<I: Clone> ParserError<I> for SemverParseError<I> {
     }
 }
 
-impl<I> AddContext<I> for SemverParseError<I> {
-    fn add_context(self, _input: &I, ctx: &'static str) -> Self {
+impl<I: Stream> AddContext<I> for SemverParseError<I> {
+    fn add_context(
+        self,
+        _input: &I,
+        _token_start: &<I as Stream>::Checkpoint,
+        ctx: &'static str,
+    ) -> Self {
         Self {
             input: self.input,
             context: Some(ctx),
