@@ -9,10 +9,11 @@ keywords = ["semver", "parser", "npm", "nodejs", "node"]
 categories = ["parser-implementations", "data-structures", "value-formatting"]
 license = "Apache-2.0"
 readme = "README.md"
+rust-version = "1.70.0"
 edition = "2021"
 
 [dependencies]
-miette = "5.10.0"
+miette = "7.2"
 winnow = "0.6"
 thiserror = "1.0.49"
 bytecount = "0.6.4"
