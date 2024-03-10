@@ -1,5 +1,18 @@
 # `nodejs-semver` Release Changelog
 
+<a name="4.0.0"></a>
+## 4.0.0 (2024-03-10)
+
+### Miscellaneous Tasks
+
+* **winnow:** upgrate to `winnow` 0.6 ([#6](https://github.com/cijiugechu/nodejs-semver/pull/6))
+
+* **miette:** upgrate to `miette` 7.2 ([#7](https://github.com/cijiugechu/nodejs-semver/pull/7)) 
+
+### **BREAKING CHANGE**
+
+bump MSRV to `1.70.0` ([#7](https://github.com/cijiugechu/nodejs-semver/pull/7))
+
 <a name="3.4.0"></a>
 ## 3.4.0 (2024-01-06)
 
