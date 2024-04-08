@@ -496,7 +496,7 @@ impl fmt::Display for Version {
 macro_rules! impl_from_unsigned_for_version {
     ($($t:ident),+) => {
         $(
-            impl std::convert::From<($t, $t, $t)> for Version {
+            impl ::std::convert::From<($t, $t, $t)> for Version {
                 fn from((major, minor, patch): ($t, $t, $t)) -> Self {
                     Version {
                         major: major as u64,
@@ -508,7 +508,7 @@ macro_rules! impl_from_unsigned_for_version {
                 }
             }
 
-            impl std::convert::From<($t, $t, $t, $t)> for Version {
+            impl ::std::convert::From<($t, $t, $t, $t)> for Version {
                 fn from((major, minor, patch, pre_release): ($t, $t, $t, $t)) -> Self {
                     Version {
                         major: major as u64,
@@ -526,7 +526,7 @@ macro_rules! impl_from_unsigned_for_version {
 macro_rules! impl_from_signed_for_version {
     ($($t:ident),+) => {
         $(
-            impl std::convert::From<($t, $t, $t)> for Version {
+            impl ::std::convert::From<($t, $t, $t)> for Version {
                 fn from((major, minor, patch): ($t, $t, $t)) -> Self {
                     debug_assert!(major >= 0, "Version major must be non-negative, got {}", major);
                     debug_assert!(minor >= 0, "Version minor must be non-negative, got {}", minor);
@@ -542,7 +542,7 @@ macro_rules! impl_from_signed_for_version {
                 }
             }
 
-            impl std::convert::From<($t, $t, $t, $t)> for Version {
+            impl ::std::convert::From<($t, $t, $t, $t)> for Version {
                 fn from((major, minor, patch, pre_release): ($t, $t, $t, $t)) -> Self {
                     debug_assert!(major >= 0, "Version major must be non-negative, got {}", major);
                     debug_assert!(minor >= 0, "Version minor must be non-negative, got {}", minor);
