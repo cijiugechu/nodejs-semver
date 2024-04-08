@@ -493,34 +493,82 @@ impl fmt::Display for Version {
     }
 }
 
-impl std::convert::From<(u64, u64, u64)> for Version {
-    fn from((major, minor, patch): (u64, u64, u64)) -> Self {
-        Version {
-            major,
-            minor,
-            patch,
-            build: Vec::with_capacity(2),
-            pre_release: Vec::with_capacity(2),
-        }
+macro_rules! impl_from_unsigned_for_version {
+    ($($t:ident),+) => {
+        $(
+            impl std::convert::From<($t, $t, $t)> for Version {
+                fn from((major, minor, patch): ($t, $t, $t)) -> Self {
+                    Version {
+                        major: major as u64,
+                        minor: minor as u64,
+                        patch: patch as u64,
+                        build: Vec::new(),
+                        pre_release: Vec::new(),
+                    }
+                }
+            }
+
+            impl std::convert::From<($t, $t, $t, $t)> for Version {
+                fn from((major, minor, patch, pre_release): ($t, $t, $t, $t)) -> Self {
+                    Version {
+                        major: major as u64,
+                        minor: minor as u64,
+                        patch: patch as u64,
+                        build: Vec::new(),
+                        pre_release: vec![Identifier::Numeric(pre_release as u64)],
+                    }
+                }
+            }
+        )+
     }
 }
+
+macro_rules! impl_from_signed_for_version {
+    ($($t:ident),+) => {
+        $(
+            impl std::convert::From<($t, $t, $t)> for Version {
+                fn from((major, minor, patch): ($t, $t, $t)) -> Self {
+                    debug_assert!(major >= 0, "Version major must be non-negative, got {}", major);
+                    debug_assert!(minor >= 0, "Version minor must be non-negative, got {}", minor);
+                    debug_assert!(patch >= 0, "Version patch must be non-negative, got {}", patch);
+
+                    Version {
+                        major: major as u64,
+                        minor: minor as u64,
+                        patch: patch as u64,
+                        build: Vec::new(),
+                        pre_release: Vec::new(),
+                    }
+                }
+            }
+
+            impl std::convert::From<($t, $t, $t, $t)> for Version {
+                fn from((major, minor, patch, pre_release): ($t, $t, $t, $t)) -> Self {
+                    debug_assert!(major >= 0, "Version major must be non-negative, got {}", major);
+                    debug_assert!(minor >= 0, "Version minor must be non-negative, got {}", minor);
+                    debug_assert!(patch >= 0, "Version patch must be non-negative, got {}", patch);
+                    debug_assert!(pre_release >= 0, "Version pre-release must be non-negative, got {}", pre_release);
+
+                    Version {
+                        major: major as u64,
+                        minor: minor as u64,
+                        patch: patch as u64,
+                        build: Vec::new(),
+                        pre_release: vec![Identifier::Numeric(pre_release as u64)],
+                    }
+                }
+            }
+        )+
+    }
+}
+
+impl_from_unsigned_for_version!(u8, u16, u32, u64, usize);
+impl_from_signed_for_version!(i8, i16, i32, i64, isize);
 
 impl std::str::FromStr for Version {
     type Err = SemverError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Version::parse(s)
-    }
-}
-
-impl std::convert::From<(u64, u64, u64, u64)> for Version {
-    fn from((major, minor, patch, pre_release): (u64, u64, u64, u64)) -> Self {
-        Version {
-            major,
-            minor,
-            patch,
-            build: Vec::new(),
-            pre_release: vec![Identifier::Numeric(pre_release)],
-        }
     }
 }
 
