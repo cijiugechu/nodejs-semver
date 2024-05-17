@@ -5,9 +5,9 @@
 
 ### Miscellaneous Tasks
 
-* **winnow:** upgrate to `winnow` 0.6 ([#6](https://github.com/cijiugechu/nodejs-semver/pull/6))
+* **winnow:** upgrade to `winnow` 0.6 ([#6](https://github.com/cijiugechu/nodejs-semver/pull/6))
 
-* **miette:** upgrate to `miette` 7.2 ([#7](https://github.com/cijiugechu/nodejs-semver/pull/7)) 
+* **miette:** upgrade to `miette` 7.2 ([#7](https://github.com/cijiugechu/nodejs-semver/pull/7)) 
 
 ### **BREAKING CHANGE**
 
