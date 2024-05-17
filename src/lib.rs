@@ -176,8 +176,6 @@ pub enum SemverErrorKind {
     #[diagnostic(code(nodejs_semver::parse_component_error), url(docsrs))]
     Context(&'static str),
 
-    /**
-     */
     #[error("No valid ranges could be parsed")]
     #[diagnostic(code(nodejs_semver::no_valid_ranges), url(docsrs), help("nodejs-semver parses in so-called 'loose' mode. This means that if you have a slightly incorrect semver operator (`>=1.y`, for ex.), it will get thrown away. This error only happens if _all_ your input ranges were invalid semver in this way."))]
     NoValidRanges,
