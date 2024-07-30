@@ -15,15 +15,15 @@ edition = "2021"
 [dependencies]
 miette = "7.2"
 winnow = "0.6"
-thiserror = "1.0.49"
-bytecount = "0.6.4"
-serde = { version = "1.0.190", features = ["derive"], optional = true }
+thiserror = "1.0.63"
+bytecount = "0.6.8"
+serde = { version = "1.0.204", features = ["derive"], optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
 criterion         = {  version = "0.5.1", features = ["html_reports"] }
 serde_json        = "1.0"
-serde = { version = "1.0.190", features = ["derive"] }
+serde = { version = "1.0.204", features = ["derive"] }
 
 [features]
 default = []
