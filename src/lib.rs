@@ -705,7 +705,7 @@ pub(crate) fn number<'s>(input: &mut &'s str) -> PResult<u64, SemverParseError<&
     #[allow(suspicious_double_ref_op)]
     let copied = input.clone();
 
-    Parser::try_map(Parser::recognize(digit1), |raw| {
+    Parser::try_map(Parser::take(digit1), |raw| {
         let value = str::parse(raw).map_err(|e| SemverParseError {
             input: copied,
             context: None,
