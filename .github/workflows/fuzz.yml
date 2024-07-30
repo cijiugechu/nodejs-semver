@@ -19,4 +19,6 @@ jobs:
         run: rustup default nightly
 
       - name: Run Fuzzer
-        run: cargo +nightly fuzz run semver -- -only_ascii=1 -max_total_time=120 -max_len=30
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo +nightly fuzz run semver -- -only_ascii=1 -max_total_time=120 -max_len=30
