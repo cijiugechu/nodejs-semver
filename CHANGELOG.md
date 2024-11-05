@@ -1,5 +1,24 @@
 # `nodejs-semver` Release Changelog
 
+<a name="4.1.0"></a>
+## 4.1.0 (2024-11-05)
+
+### Features
+
+* **conversion:** implement additional traits for converting integer types to Version. ([d1b6021](https://github.com/cijiugechu/nodejs-semver/commit/d1b6021381be66f8edb8359cdc987a21945baca2)) 
+
+### Bug Fixes
+
+* **namespace:** add prefix to std to avoid namespace conflict ([02a866b](https://github.com/cijiugechu/nodejs-semver/commit/02a866b0c2a0128ff394f6624db2d906a1b9ad73))
+
+### Performance
+
+* **range:** boxing `BoundSet` ([#8](https://github.com/cijiugechu/nodejs-semver/pull/8)) 
+
+### Miscellaneous Tasks
+
+* **deps:** bump deps
+
 <a name="4.0.0"></a>
 ## 4.0.0 (2024-03-10)
 
