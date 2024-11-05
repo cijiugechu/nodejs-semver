@@ -16,6 +16,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             let _r = range.satisfies(black_box(&version));
         })
     });
+
+    c.bench_function("min version in range", |b| {
+        b.iter(|| {
+            let range = Range::parse(black_box(">=1.2.3-rc.4")).unwrap();
+            let _version = range.min_version().unwrap();
+        })
+    });
 }
 
 criterion_group!(bench, criterion_benchmark);
