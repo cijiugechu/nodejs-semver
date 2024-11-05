@@ -19,8 +19,8 @@ use crate::{
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 struct BoundSet {
-    upper: Bound,
-    lower: Bound,
+    upper: Box<Bound>,
+    lower: Box<Bound>,
 }
 
 impl BoundSet {
@@ -36,10 +36,13 @@ impl BoundSet {
                 None
             }
             (Lower(Including(v1)), Upper(Including(v2))) if v1 == v2 => Some(Self {
-                lower: Lower(Including(v1)),
-                upper: Upper(Including(v2)),
+                lower: Box::new(Lower(Including(v1))),
+                upper: Box::new(Upper(Including(v2))),
             }),
-            (lower, upper) if lower < upper => Some(Self { lower, upper }),
+            (lower, upper) if lower < upper => Some(Self {
+                lower: Box::new(lower),
+                upper: Box::new(upper),
+            }),
             _ => None,
         }
     }
@@ -63,7 +66,7 @@ impl BoundSet {
         use Bound::*;
         use Predicate::*;
 
-        let lower_bound = match &self.lower {
+        let lower_bound = match &self.lower.as_ref() {
             Lower(Including(lower)) => lower <= version,
             Lower(Excluding(lower)) => lower < version,
             Lower(Unbounded) => true,
@@ -73,7 +76,7 @@ impl BoundSet {
             ),
         };
 
-        let upper_bound = match &self.upper {
+        let upper_bound = match &self.upper.as_ref() {
             Upper(Including(upper)) => version <= upper,
             Upper(Excluding(upper)) => version < upper,
             Upper(Unbounded) => true,
@@ -88,7 +91,7 @@ impl BoundSet {
         }
 
         if version.is_prerelease() {
-            let lower_version = match &self.lower {
+            let lower_version = match &self.lower.as_ref() {
                 Lower(Including(v)) => Some(v),
                 Lower(Excluding(v)) => Some(v),
                 _ => None,
@@ -103,7 +106,7 @@ impl BoundSet {
                 }
             }
 
-            let upper_version = match &self.upper {
+            let upper_version = match &self.upper.as_ref() {
                 Upper(Including(v)) => Some(v),
                 Upper(Excluding(v)) => Some(v),
                 _ => None,
@@ -141,8 +144,8 @@ impl BoundSet {
     }
 
     fn intersect(&self, other: &Self) -> Option<Self> {
-        let lower = std::cmp::max(&self.lower, &other.lower);
-        let upper = std::cmp::min(&self.upper, &other.upper);
+        let lower: &Bound = std::cmp::max(&self.lower, &other.lower);
+        let upper: &Bound = std::cmp::min(&self.upper, &other.upper);
 
         BoundSet::new(lower.clone(), upper.clone())
     }
@@ -157,19 +160,19 @@ impl BoundSet {
 
             if self.lower < overlap.lower && overlap.upper < self.upper {
                 return Some(vec![
-                    BoundSet::new(self.lower.clone(), Upper(overlap.lower.predicate().flip()))
+                    BoundSet::new(*self.lower.clone(), Upper(overlap.lower.predicate().flip()))
                         .unwrap(),
-                    BoundSet::new(Lower(overlap.upper.predicate().flip()), self.upper.clone())
+                    BoundSet::new(Lower(overlap.upper.predicate().flip()), *self.upper.clone())
                         .unwrap(),
                 ]);
             }
 
             if self.lower < overlap.lower {
-                return BoundSet::new(self.lower.clone(), Upper(overlap.lower.predicate().flip()))
+                return BoundSet::new(*self.lower.clone(), Upper(overlap.lower.predicate().flip()))
                     .map(|f| vec![f]);
             }
 
-            BoundSet::new(Lower(overlap.upper.predicate().flip()), self.upper.clone())
+            BoundSet::new(Lower(overlap.upper.predicate().flip()), *self.upper.clone())
                 .map(|f| vec![f])
         } else {
             Some(vec![self.clone()])
@@ -181,7 +184,7 @@ impl fmt::Display for BoundSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Bound::*;
         use Predicate::*;
-        match (&self.lower, &self.upper) {
+        match (&self.lower.as_ref(), &self.upper.as_ref()) {
             (Lower(Unbounded), Upper(Unbounded)) => write!(f, "*"),
             (Lower(Unbounded), Upper(Including(v))) => write!(f, "<={}", v),
             (Lower(Unbounded), Upper(Excluding(v))) => write!(f, "<{}", v),
@@ -502,6 +505,7 @@ impl Range {
     */
     pub fn min_version(&self) -> Option<Version> {
         if let Some(min_bound) = self.0.iter().map(|range| &range.lower).min() {
+            let min_bound = min_bound.as_ref();
             match min_bound {
                 Bound::Lower(pred) => match pred {
                     Predicate::Including(v) => Some(v.clone()),
