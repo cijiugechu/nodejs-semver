@@ -483,9 +483,7 @@ impl Range {
     #[doc = include_str!("../examples/max_satisfying.rs")]
     ///
     pub fn max_satisfying<'v>(&self, versions: &'v [Version]) -> Option<&'v Version> {
-        let filtered: Vec<_> = versions.iter().filter(|v| self.satisfies(v)).collect();
-
-        filtered.into_iter().max()
+        versions.iter().filter(|v| self.satisfies(v)).max()
     }
 
     /// Return the lowest [Version] in the list that satisfies the range,
@@ -495,9 +493,7 @@ impl Range {
     #[doc = include_str!("../examples/min_satisfying.rs")]
     ///
     pub fn min_satisfying<'v>(&self, versions: &'v [Version]) -> Option<&'v Version> {
-        let filtered: Vec<_> = versions.iter().filter(|v| self.satisfies(v)).collect();
-
-        filtered.into_iter().min()
+        versions.iter().filter(|v| self.satisfies(v)).min()
     }
 
     /**
