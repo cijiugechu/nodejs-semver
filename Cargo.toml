@@ -13,7 +13,7 @@ rust-version = "1.70.0"
 edition = "2021"
 
 [dependencies]
-miette = "7.2"
+miette = "7.4"
 winnow = "0.6"
 thiserror = "1.0.63"
 bytecount = "0.6.8"
