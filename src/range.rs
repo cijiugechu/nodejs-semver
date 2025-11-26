@@ -432,35 +432,6 @@ pub enum OutsideDirection {
     Lower,
 }
 
-impl OutsideDirection {
-    fn comparator_ops(
-        &self,
-    ) -> (
-        fn(&Version, &Version) -> bool,
-        fn(&Version, &Version) -> bool,
-        fn(&Version, &Version) -> bool,
-        Operation,
-        Operation,
-    ) {
-        match self {
-            OutsideDirection::Higher => (
-                |a: &Version, b: &Version| a > b,
-                |a: &Version, b: &Version| a <= b,
-                |a: &Version, b: &Version| a < b,
-                Operation::GreaterThan,
-                Operation::GreaterThanEquals,
-            ),
-            OutsideDirection::Lower => (
-                |a: &Version, b: &Version| a < b,
-                |a: &Version, b: &Version| a >= b,
-                |a: &Version, b: &Version| a > b,
-                Operation::LessThan,
-                Operation::LessThanEquals,
-            ),
-        }
-    }
-}
-
 impl TryFrom<char> for OutsideDirection {
     type Error = RangeError;
 
@@ -726,6 +697,110 @@ impl Range {
         }
     }
 
+    #[inline]
+    fn outside_higher(
+        &self,
+        version: &Version,
+        include_prerelease: bool,
+    ) -> Result<bool, RangeError> {
+        if self.satisfies_with_prerelease(version, include_prerelease) {
+            return Ok(false);
+        }
+
+        for range in &self.0 {
+            let mut high: Option<Comparator> = None;
+            let mut low: Option<Comparator> = None;
+
+            for comparator in range.comparators() {
+                if high
+                    .as_ref()
+                    .map_or(true, |h| comparator.version > h.version)
+                {
+                    high = Some(comparator.clone());
+                }
+
+                if low
+                    .as_ref()
+                    .map_or(true, |l| comparator.version < l.version)
+                {
+                    low = Some(comparator);
+                }
+            }
+
+            let (Some(high), Some(low)) = (high.as_ref(), low.as_ref()) else {
+                return Err(RangeError::MissingComparatorBounds);
+            };
+
+            if matches!(
+                high.op,
+                Operation::GreaterThan | Operation::GreaterThanEquals
+            ) {
+                return Ok(false);
+            }
+
+            let low_is_empty = matches!(low.op, Operation::Exact);
+
+            if ((low_is_empty || matches!(low.op, Operation::GreaterThan))
+                && version <= &low.version)
+                || (matches!(low.op, Operation::GreaterThanEquals) && version < &low.version)
+            {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    #[inline]
+    fn outside_lower(
+        &self,
+        version: &Version,
+        include_prerelease: bool,
+    ) -> Result<bool, RangeError> {
+        if self.satisfies_with_prerelease(version, include_prerelease) {
+            return Ok(false);
+        }
+
+        for range in &self.0 {
+            let mut high: Option<Comparator> = None;
+            let mut low: Option<Comparator> = None;
+
+            for comparator in range.comparators() {
+                if high
+                    .as_ref()
+                    .map_or(true, |h| comparator.version < h.version)
+                {
+                    high = Some(comparator.clone());
+                }
+
+                if low
+                    .as_ref()
+                    .map_or(true, |l| comparator.version > l.version)
+                {
+                    low = Some(comparator);
+                }
+            }
+
+            let (Some(high), Some(low)) = (high.as_ref(), low.as_ref()) else {
+                return Err(RangeError::MissingComparatorBounds);
+            };
+
+            if matches!(high.op, Operation::LessThan | Operation::LessThanEquals) {
+                return Ok(false);
+            }
+
+            let low_is_empty = matches!(low.op, Operation::Exact);
+
+            if ((low_is_empty || matches!(low.op, Operation::LessThan)) && version >= &low.version)
+                || (matches!(low.op, Operation::LessThanEquals) && version > &low.version)
+            {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
     /// Return `Ok(true)` if the [Version] sits entirely outside this range in
     /// the specified direction.
     ///
@@ -744,50 +819,10 @@ impl Range {
         direction: OutsideDirection,
         include_prerelease: bool,
     ) -> Result<bool, RangeError> {
-        let (gt_fn, lte_fn, lt_fn, comp, ecomp) = direction.comparator_ops();
-
-        if self.satisfies_with_prerelease(version, include_prerelease) {
-            return Ok(false);
+        match direction {
+            OutsideDirection::Higher => self.outside_higher(version, include_prerelease),
+            OutsideDirection::Lower => self.outside_lower(version, include_prerelease),
         }
-
-        for range in &self.0 {
-            let mut high: Option<Comparator> = None;
-            let mut low: Option<Comparator> = None;
-
-            for comparator in range.comparators() {
-                if high
-                    .as_ref()
-                    .map_or(true, |h| gt_fn(&comparator.version, &h.version))
-                {
-                    high = Some(comparator.clone());
-                }
-
-                if low
-                    .as_ref()
-                    .map_or(true, |l| lt_fn(&comparator.version, &l.version))
-                {
-                    low = Some(comparator);
-                }
-            }
-
-            let (Some(high), Some(low)) = (high.as_ref(), low.as_ref()) else {
-                return Err(RangeError::MissingComparatorBounds);
-            };
-
-            if high.op == comp || high.op == ecomp {
-                return Ok(false);
-            }
-
-            let low_is_empty = matches!(low.op, Operation::Exact);
-
-            if ((low_is_empty || low.op == comp) && lte_fn(version, &low.version))
-                || (low.op == ecomp && lt_fn(version, &low.version))
-            {
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
     }
 }
 

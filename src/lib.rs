@@ -207,11 +207,7 @@ impl<I: Clone + Stream> ParserError<I> for SemverParseError<I> {
         }
     }
 
-    fn append(
-        self,
-        input: &I,
-        _token_start: &<I as Stream>::Checkpoint,
-    ) -> Self {
+    fn append(self, input: &I, _token_start: &<I as Stream>::Checkpoint) -> Self {
         Self {
             input: input.clone(),
             context: self.context,
@@ -555,7 +551,7 @@ impl Version {
                 ]
             };
 
-            if let Some(first) = self.pre_release.get(0) {
+            if let Some(first) = self.pre_release.first() {
                 if compare_identifier_and_str(first, &id) == Ordering::Equal {
                     if !matches!(self.pre_release.get(1), Some(Identifier::Numeric(_))) {
                         self.pre_release = prerelease;
@@ -908,7 +904,9 @@ fn extras<'s>(
 }
 
 /// <version core> ::= <major> "." <minor> "." <patch>
-fn version_core<'s>(input: &mut &'s str) -> ModalResult<(u64, u64, u64), SemverParseError<&'s str>> {
+fn version_core<'s>(
+    input: &mut &'s str,
+) -> ModalResult<(u64, u64, u64), SemverParseError<&'s str>> {
     (number, literal("."), number, literal("."), number)
         .map(|(major, _, minor, _, patch)| (major, minor, patch))
         .context("version core")
