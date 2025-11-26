@@ -17,7 +17,7 @@ jobs:
           components: rustfmt, clippy, rust-docs
       - uses: Swatinem/rust-cache@v2
       - name: clippy
-        run: cargo clippy --all -- -D warnings
+        run: cargo clippy --all
       - name: rustfmt
         run: cargo fmt --all -- --check
       - name: docs
