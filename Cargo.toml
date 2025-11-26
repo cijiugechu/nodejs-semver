@@ -6,6 +6,7 @@ description = "A node-semver compliant semver implementation in Rust."
 repository = "https://github.com/cijiugechu/nodejs-semver"
 documentation = "https://docs.rs/nodejs-semver"
 keywords = ["semver", "parser", "npm", "nodejs", "node"]
+exclude = ["./node-semver"]
 categories = ["parser-implementations", "data-structures", "value-formatting"]
 license = "Apache-2.0"
 readme = "README.md"

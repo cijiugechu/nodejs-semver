@@ -326,6 +326,13 @@ impl Version {
         range.satisfies(self)
     }
 
+    /// True if this [Version] satisfies the given [Range], treating prerelease
+    /// versions as valid matches even when the range does not explicitly
+    /// mention one.
+    pub fn satisfies_with_prerelease(&self, range: &Range, include_prerelease: bool) -> bool {
+        range.satisfies_with_prerelease(self, include_prerelease)
+    }
+
     /// True is this [Version] has a prerelease component.
     pub fn is_prerelease(&self) -> bool {
         !self.pre_release.is_empty()

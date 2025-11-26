@@ -1,4 +1,5 @@
 use std::cmp::{Ord, Ordering, PartialOrd};
+use std::convert::TryFrom;
 use std::fmt;
 
 use winnow::ascii::{space0, space1};
@@ -11,6 +12,7 @@ use winnow::{PResult, Parser};
 
 #[cfg(feature = "serde")]
 use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::{
     extras, number, Identifier, SemverError, SemverErrorKind, SemverParseError, Version,
@@ -62,7 +64,7 @@ impl BoundSet {
         )
     }
 
-    fn satisfies(&self, version: &Version) -> bool {
+    fn satisfies(&self, version: &Version, include_prerelease: bool) -> bool {
         use Bound::*;
         use Predicate::*;
 
@@ -90,7 +92,7 @@ impl BoundSet {
             return false;
         }
 
-        if version.is_prerelease() {
+        if version.is_prerelease() && !include_prerelease {
             let lower_version = match &self.lower.as_ref() {
                 Lower(Including(v)) => Some(v),
                 Lower(Excluding(v)) => Some(v),
@@ -178,6 +180,10 @@ impl BoundSet {
             Some(vec![self.clone()])
         }
     }
+
+    fn comparators(&self) -> impl Iterator<Item = Comparator> + '_ {
+        ComparatorIter::new(self)
+    }
 }
 
 impl fmt::Display for BoundSet {
@@ -250,6 +256,21 @@ impl Bound {
             Upper(p) => p,
         }
     }
+
+    fn rank(&self) -> (&Version, i8) {
+        use Bound::*;
+        use Predicate::*;
+
+        match self {
+            Upper(Excluding(v)) => (v, 0),
+            Lower(Including(v)) => (v, 1),
+            Upper(Including(v)) => (v, 2),
+            Lower(Excluding(v)) => (v, 3),
+            Lower(Unbounded) | Upper(Unbounded) => {
+                unreachable!("cannot rank unbounded bounds")
+            }
+        }
+    }
 }
 
 impl Ord for Bound {
@@ -261,48 +282,17 @@ impl Ord for Bound {
             (Lower(Unbounded), Lower(Unbounded)) | (Upper(Unbounded), Upper(Unbounded)) => {
                 Ordering::Equal
             }
-            (Upper(Unbounded), _) | (_, Lower(Unbounded)) => Ordering::Greater,
-            (Lower(Unbounded), _) | (_, Upper(Unbounded)) => Ordering::Less,
+            (Lower(Unbounded), _) => Ordering::Less,
+            (_, Lower(Unbounded)) => Ordering::Greater,
+            (Upper(Unbounded), _) => Ordering::Greater,
+            (_, Upper(Unbounded)) => Ordering::Less,
+            _ => {
+                let (self_version, self_rank) = self.rank();
+                let (other_version, other_rank) = other.rank();
 
-            (Upper(Including(v1)), Upper(Including(v2)))
-            | (Upper(Including(v1)), Lower(Including(v2)))
-            | (Upper(Excluding(v1)), Upper(Excluding(v2)))
-            | (Upper(Excluding(v1)), Lower(Excluding(v2)))
-            | (Lower(Including(v1)), Upper(Including(v2)))
-            | (Lower(Including(v1)), Lower(Including(v2)))
-            | (Lower(Excluding(v1)), Lower(Excluding(v2))) => v1.cmp(v2),
-
-            (Lower(Excluding(v1)), Upper(Excluding(v2)))
-            | (Lower(Including(v1)), Upper(Excluding(v2))) => {
-                if v2 <= v1 {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            }
-            (Upper(Including(v1)), Upper(Excluding(v2)))
-            | (Upper(Including(v1)), Lower(Excluding(v2)))
-            | (Lower(Excluding(v1)), Upper(Including(v2))) => {
-                if v2 < v1 {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            }
-            (Lower(Excluding(v1)), Lower(Including(v2))) => {
-                if v1 < v2 {
-                    Ordering::Less
-                } else {
-                    Ordering::Greater
-                }
-            }
-            (Lower(Including(v1)), Lower(Excluding(v2)))
-            | (Upper(Excluding(v1)), Lower(Including(v2)))
-            | (Upper(Excluding(v1)), Upper(Including(v2))) => {
-                if v1 <= v2 {
-                    Ordering::Less
-                } else {
-                    Ordering::Greater
+                match self_version.cmp(other_version) {
+                    Ordering::Equal => self_rank.cmp(&other_rank),
+                    ord => ord,
                 }
             }
         }
@@ -315,6 +305,185 @@ impl PartialOrd for Bound {
     }
 }
 
+#[derive(Clone, Debug)]
+struct Comparator {
+    op: Operation,
+    version: Version,
+}
+
+struct ComparatorIter {
+    state: ComparatorIterState,
+}
+
+enum ComparatorIterState {
+    Exact(Option<Comparator>),
+    Pair {
+        items: [Option<Comparator>; 2],
+        index: usize,
+    },
+    Fallback(Option<Comparator>),
+    Done,
+}
+
+impl ComparatorIter {
+    fn new(bound_set: &BoundSet) -> Self {
+        match (&*bound_set.lower, &*bound_set.upper) {
+            (Bound::Lower(Predicate::Including(low)), Bound::Upper(Predicate::Including(high)))
+                if low == high =>
+            {
+                return Self {
+                    state: ComparatorIterState::Exact(Some(Comparator {
+                        op: Operation::Exact,
+                        version: low.clone(),
+                    })),
+                };
+            }
+            _ => {}
+        }
+
+        let upper = Comparator::from_bound(&bound_set.upper);
+        let lower = Comparator::from_bound(&bound_set.lower);
+
+        if upper.is_none() && lower.is_none() {
+            return Self {
+                state: ComparatorIterState::Fallback(Some(Comparator {
+                    op: Operation::GreaterThanEquals,
+                    version: Version::from((0, 0, 0)),
+                })),
+            };
+        }
+
+        Self {
+            state: ComparatorIterState::Pair {
+                items: [upper, lower],
+                index: 0,
+            },
+        }
+    }
+}
+
+impl Iterator for ComparatorIter {
+    type Item = Comparator;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use ComparatorIterState::*;
+
+        match &mut self.state {
+            Exact(opt) => {
+                let next = opt.take();
+                if next.is_none() {
+                    self.state = Done;
+                }
+                next
+            }
+            Pair { items, index } => {
+                while *index < items.len() {
+                    let candidate = items[*index].take();
+                    *index += 1;
+                    if candidate.is_some() {
+                        return candidate;
+                    }
+                }
+                self.state = Done;
+                None
+            }
+            Fallback(opt) => {
+                let next = opt.take();
+                if next.is_none() {
+                    self.state = Done;
+                }
+                next
+            }
+            Done => None,
+        }
+    }
+}
+
+impl Comparator {
+    fn from_bound(bound: &Bound) -> Option<Self> {
+        match bound {
+            Bound::Lower(Predicate::Including(v)) => Some(Self {
+                op: Operation::GreaterThanEquals,
+                version: v.clone(),
+            }),
+            Bound::Lower(Predicate::Excluding(v)) => Some(Self {
+                op: Operation::GreaterThan,
+                version: v.clone(),
+            }),
+            Bound::Upper(Predicate::Including(v)) => Some(Self {
+                op: Operation::LessThanEquals,
+                version: v.clone(),
+            }),
+            Bound::Upper(Predicate::Excluding(v)) => Some(Self {
+                op: Operation::LessThan,
+                version: v.clone(),
+            }),
+            Bound::Lower(Predicate::Unbounded) | Bound::Upper(Predicate::Unbounded) => None,
+        }
+    }
+}
+
+/// Direction in which to check whether a [Version] lies outside a [Range].
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum OutsideDirection {
+    /// Check whether the version is greater than the range.
+    Higher,
+    /// Check whether the version is lower than the range.
+    Lower,
+}
+
+impl OutsideDirection {
+    fn comparator_ops(
+        &self,
+    ) -> (
+        fn(&Version, &Version) -> bool,
+        fn(&Version, &Version) -> bool,
+        fn(&Version, &Version) -> bool,
+        Operation,
+        Operation,
+    ) {
+        match self {
+            OutsideDirection::Higher => (
+                |a: &Version, b: &Version| a > b,
+                |a: &Version, b: &Version| a <= b,
+                |a: &Version, b: &Version| a < b,
+                Operation::GreaterThan,
+                Operation::GreaterThanEquals,
+            ),
+            OutsideDirection::Lower => (
+                |a: &Version, b: &Version| a < b,
+                |a: &Version, b: &Version| a >= b,
+                |a: &Version, b: &Version| a > b,
+                Operation::LessThan,
+                Operation::LessThanEquals,
+            ),
+        }
+    }
+}
+
+impl TryFrom<char> for OutsideDirection {
+    type Error = RangeError;
+
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        match value {
+            '>' => Ok(Self::Higher),
+            '<' => Ok(Self::Lower),
+            other => Err(RangeError::InvalidOutsideDirection(other)),
+        }
+    }
+}
+
+/// Errors that can occur when evaluating range relationships outside of parsing.
+#[derive(Debug, Clone, Copy, Error, Eq, PartialEq)]
+pub enum RangeError {
+    #[error(
+        "outside() only supports checking whether a version is above or below a range, found `{0}`"
+    )]
+    InvalidOutsideDirection(char),
+    #[error("outside() could not determine comparator bounds for this range")]
+    MissingComparatorBounds,
+}
+
 /**
 Node-style semver range.
 
@@ -325,6 +494,15 @@ For details on supported syntax, see <https://github.com/npm/node-semver#advance
 */
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Range(Vec<BoundSet>);
+
+impl fmt::Display for OutsideDirection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OutsideDirection::Higher => write!(f, ">"),
+            OutsideDirection::Lower => write!(f, "<"),
+        }
+    }
+}
 
 impl fmt::Display for Operation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -361,6 +539,14 @@ impl Range {
     pub fn parse<S: AsRef<str>>(input: S) -> Result<Self, SemverError> {
         let mut input = input.as_ref();
 
+        if input.trim().is_empty() {
+            return Ok(Self::any());
+        }
+
+        if input.split("||").all(|part| part.trim().is_empty()) {
+            return Ok(Self::any());
+        }
+
         match range_set.parse_next(&mut input) {
             Ok(range) => Ok(range),
             Err(err) => Err(match err {
@@ -395,13 +581,19 @@ impl Range {
     Returns true if `version` is satisfied by this range.
     */
     pub fn satisfies(&self, version: &Version) -> bool {
-        for range in &self.0 {
-            if range.satisfies(version) {
-                return true;
-            }
-        }
+        self.satisfies_with_prerelease(version, false)
+    }
 
-        false
+    /**
+    Returns true if `version` is satisfied by this range.
+
+    This behaves like [Range::satisfies], but will also consider pre-release
+    versions even if the range itself does not specify a matching pre-release.
+    */
+    pub fn satisfies_with_prerelease(&self, version: &Version, include_prerelease: bool) -> bool {
+        self.0
+            .iter()
+            .any(|range| range.satisfies(version, include_prerelease))
     }
 
     /**
@@ -532,6 +724,70 @@ impl Range {
         } else {
             None
         }
+    }
+
+    /// Return `Ok(true)` if the [Version] sits entirely outside this range in
+    /// the specified direction.
+    ///
+    /// `direction` mirrors the JavaScript implementation's "hi/lo" flag:
+    /// [`OutsideDirection::Higher`] checks whether the version is greater than
+    /// the range, while [`OutsideDirection::Lower`] checks whether it is lower.
+    /// Set `include_prerelease` to `true` to treat prerelease versions as
+    /// satisfiable even when the range does not explicitly mention them.
+    ///
+    /// # Errors
+    /// Returns [`RangeError::MissingComparatorBounds`] if the range does not
+    /// expose enough comparator information to perform the comparison.
+    pub fn outside(
+        &self,
+        version: &Version,
+        direction: OutsideDirection,
+        include_prerelease: bool,
+    ) -> Result<bool, RangeError> {
+        let (gt_fn, lte_fn, lt_fn, comp, ecomp) = direction.comparator_ops();
+
+        if self.satisfies_with_prerelease(version, include_prerelease) {
+            return Ok(false);
+        }
+
+        for range in &self.0 {
+            let mut high: Option<Comparator> = None;
+            let mut low: Option<Comparator> = None;
+
+            for comparator in range.comparators() {
+                if high
+                    .as_ref()
+                    .map_or(true, |h| gt_fn(&comparator.version, &h.version))
+                {
+                    high = Some(comparator.clone());
+                }
+
+                if low
+                    .as_ref()
+                    .map_or(true, |l| lt_fn(&comparator.version, &l.version))
+                {
+                    low = Some(comparator);
+                }
+            }
+
+            let (Some(high), Some(low)) = (high.as_ref(), low.as_ref()) else {
+                return Err(RangeError::MissingComparatorBounds);
+            };
+
+            if high.op == comp || high.op == ecomp {
+                return Ok(false);
+            }
+
+            let low_is_empty = matches!(low.op, Operation::Exact);
+
+            if ((low_is_empty || low.op == comp) && lte_fn(version, &low.version))
+                || (low.op == ecomp && lt_fn(version, &low.version))
+            {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 }
 
@@ -1496,6 +1752,366 @@ mod difference {
                 resulting_range.unwrap_or_else(|| "⊗".into())
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod outside {
+    use super::*;
+    use std::convert::TryFrom;
+
+    const VERSION_GT_RANGE: &[(&str, &str, bool)] = &[
+        ("~1.2.2", "1.3.0", false),
+        ("~0.6.1-1", "0.7.1-1", false),
+        ("1.0.0 - 2.0.0", "2.0.1", false),
+        ("1.0.0", "1.0.1-beta1", false),
+        ("1.0.0", "2.0.0", false),
+        ("<=2.0.0", "2.1.1", false),
+        ("<=2.0.0", "3.2.9", false),
+        ("<2.0.0", "2.0.0", false),
+        ("0.1.20 || 1.2.4", "1.2.5", false),
+        ("2.x.x", "3.0.0", false),
+        ("1.2.x", "1.3.0", false),
+        ("1.2.x || 2.x", "3.0.0", false),
+        ("2.*.*", "5.0.1", false),
+        ("1.2.*", "1.3.3", false),
+        ("1.2.* || 2.*", "4.0.0", false),
+        ("2", "3.0.0", false),
+        ("2.3", "2.4.2", false),
+        ("~2.4", "2.5.0", false),
+        ("~2.4", "2.5.5", false),
+        ("~>3.2.1", "3.3.0", false),
+        ("~1", "2.2.3", false),
+        ("~>1", "2.2.4", false),
+        ("~> 1", "3.2.3", false),
+        ("~1.0", "1.1.2", false),
+        ("~ 1.0", "1.1.0", false),
+        ("<1.2", "1.2.0", false),
+        ("< 1.2", "1.2.1", false),
+        ("1", "2.0.0beta", false),
+        ("~v0.5.4-pre", "0.6.0", false),
+        ("~v0.5.4-pre", "0.6.1-pre", false),
+        ("=0.7.x", "0.8.0", false),
+        ("=0.7.x", "0.8.0-asdf", false),
+        ("<0.7.x", "0.7.0", false),
+        ("1.0.0 - 2.0.0", "2.2.3", false),
+        ("1.0.0", "1.0.1", false),
+        ("<=2.0.0", "3.0.0", false),
+        ("<=2.0.0", "2.9999.9999", false),
+        ("<=2.0.0", "2.2.9", false),
+        ("<2.0.0", "2.9999.9999", false),
+        ("<2.0.0", "2.2.9", false),
+        ("2.x.x", "3.1.3", false),
+        ("1.2.x", "1.3.3", false),
+        ("1.2.x || 2.x", "3.1.3", false),
+        ("2.*.*", "3.1.3", false),
+        ("1.2.* || 2.*", "3.1.3", false),
+        ("2", "3.1.2", false),
+        ("2.3", "2.4.1", false),
+        ("~>3.2.1", "3.3.2", false),
+        ("~>1", "2.2.3", false),
+        ("~1.0", "1.1.0", false),
+        ("<1", "1.0.0", false),
+        ("<1", "1.0.0beta", false),
+        ("< 1", "1.0.0beta", false),
+        ("=0.7.x", "0.8.2", false),
+        ("<0.7.x", "0.7.2", false),
+        ("0.7.x", "0.7.2-beta", false),
+    ];
+
+    const VERSION_NOT_GT_RANGE: &[(&str, &str, bool)] = &[
+        ("~0.6.1-1", "0.6.1-1", false),
+        ("1.0.0 - 2.0.0", "1.2.3", false),
+        ("1.0.0 - 2.0.0", "0.9.9", false),
+        ("1.0.0", "1.0.0", false),
+        (">=*", "0.2.4", false),
+        ("", "1.0.0", false),
+        ("*", "1.2.3", false),
+        ("*", "v1.2.3-foo", false),
+        (">=1.0.0", "1.0.0", false),
+        (">=1.0.0", "1.0.1", false),
+        (">=1.0.0", "1.1.0", false),
+        (">1.0.0", "1.0.1", false),
+        (">1.0.0", "1.1.0", false),
+        ("<=2.0.0", "2.0.0", false),
+        ("<=2.0.0", "1.9999.9999", false),
+        ("<=2.0.0", "0.2.9", false),
+        ("<2.0.0", "1.9999.9999", false),
+        ("<2.0.0", "0.2.9", false),
+        (">= 1.0.0", "1.0.0", false),
+        (">=  1.0.0", "1.0.1", false),
+        (">=   1.0.0", "1.1.0", false),
+        ("> 1.0.0", "1.0.1", false),
+        (">  1.0.0", "1.1.0", false),
+        ("<=   2.0.0", "2.0.0", false),
+        ("<= 2.0.0", "1.9999.9999", false),
+        ("<=  2.0.0", "0.2.9", false),
+        ("<    2.0.0", "1.9999.9999", false),
+        ("<\t2.0.0", "0.2.9", false),
+        (">=0.1.97", "v0.1.97", false),
+        (">=0.1.97", "0.1.97", false),
+        ("0.1.20 || 1.2.4", "1.2.4", false),
+        ("0.1.20 || >1.2.4", "1.2.4", false),
+        ("0.1.20 || 1.2.4", "1.2.3", false),
+        ("0.1.20 || 1.2.4", "0.1.20", false),
+        (">=0.2.3 || <0.0.1", "0.0.0", false),
+        (">=0.2.3 || <0.0.1", "0.2.3", false),
+        (">=0.2.3 || <0.0.1", "0.2.4", false),
+        ("||", "1.3.4", false),
+        ("2.x.x", "2.1.3", false),
+        ("1.2.x", "1.2.3", false),
+        ("1.2.x || 2.x", "2.1.3", false),
+        ("1.2.x || 2.x", "1.2.3", false),
+        ("x", "1.2.3", false),
+        ("2.*.*", "2.1.3", false),
+        ("1.2.*", "1.2.3", false),
+        ("1.2.* || 2.*", "2.1.3", false),
+        ("1.2.* || 2.*", "1.2.3", false),
+        ("2", "2.1.2", false),
+        ("2.3", "2.3.1", false),
+        ("~2.4", "2.4.0", false),
+        ("~2.4", "2.4.5", false),
+        ("~>3.2.1", "3.2.2", false),
+        ("~1", "1.2.3", false),
+        ("~>1", "1.2.3", false),
+        ("~> 1", "1.2.3", false),
+        ("~1.0", "1.0.2", false),
+        ("~ 1.0", "1.0.2", false),
+        (">=1", "1.0.0", false),
+        (">= 1", "1.0.0", false),
+        ("<1.2", "1.1.1", false),
+        ("< 1.2", "1.1.1", false),
+        ("1", "1.0.0beta", false),
+        ("~v0.5.4-pre", "0.5.5", false),
+        ("~v0.5.4-pre", "0.5.4", false),
+        ("=0.7.x", "0.7.2", false),
+        (">=0.7.x", "0.7.2", false),
+        ("=0.7.x", "0.7.0-asdf", false),
+        (">=0.7.x", "0.7.0-asdf", false),
+        ("<=0.7.x", "0.6.2", false),
+        (">0.2.3 >0.2.4 <=0.2.5", "0.2.5", false),
+        (">=0.2.3 <=0.2.4", "0.2.4", false),
+        ("1.0.0 - 2.0.0", "2.0.0", false),
+        ("^1", "0.0.0-0", false),
+        ("^3.0.0", "2.0.0", false),
+        ("^1.0.0 || ~2.0.1", "2.0.0", false),
+        ("^0.1.0 || ~3.0.1 || 5.0.0", "3.2.0", false),
+        ("^0.1.0 || ~3.0.1 || 5.0.0", "1.0.0beta", false),
+        ("^0.1.0 || ~3.0.1 || 5.0.0", "5.0.0-0", false),
+        ("^0.1.0 || ~3.0.1 || >4 <=5.0.0", "3.5.0", false),
+        ("0.7.x", "0.7.2-beta", true),
+    ];
+
+    const VERSION_LT_RANGE: &[(&str, &str, bool)] = &[
+        ("~1.2.2", "1.2.1", false),
+        ("~0.6.1-1", "0.6.1-0", false),
+        ("1.0.0 - 2.0.0", "0.0.1", false),
+        ("1.0.0-beta.2", "1.0.0-beta.1", false),
+        ("1.0.0", "0.0.0", false),
+        (">=2.0.0", "1.1.1", false),
+        (">=2.0.0", "1.2.9", false),
+        (">2.0.0", "2.0.0", false),
+        ("0.1.20 || 1.2.4", "0.1.5", false),
+        ("2.x.x", "1.0.0", false),
+        ("1.2.x", "1.1.0", false),
+        ("1.2.x || 2.x", "1.0.0", false),
+        ("2.*.*", "1.0.1", false),
+        ("1.2.*", "1.1.3", false),
+        ("1.2.* || 2.*", "1.1.9999", false),
+        ("2", "1.0.0", false),
+        ("2.3", "2.2.2", false),
+        ("~2.4", "2.3.0", false),
+        ("~2.4", "2.3.5", false),
+        ("~>3.2.1", "3.2.0", false),
+        ("~1", "0.2.3", false),
+        ("~>1", "0.2.4", false),
+        ("~> 1", "0.2.3", false),
+        ("~1.0", "0.1.2", false),
+        ("~ 1.0", "0.1.0", false),
+        (">1.2", "1.2.0", false),
+        ("> 1.2", "1.2.1", false),
+        ("1", "0.0.0beta", false),
+        ("~v0.5.4-pre", "0.5.4-alpha", false),
+        ("=0.7.x", "0.6.0", false),
+        ("=0.7.x", "0.6.0-asdf", false),
+        (">=0.7.x", "0.6.0", false),
+        ("1.0.0 - 2.0.0", "0.2.3", false),
+        ("1.0.0", "0.0.1", false),
+        (">=2.0.0", "1.0.0", false),
+        (">=2.0.0", "1.9999.9999", false),
+        (">2.0.0", "1.2.9", false),
+        ("2.x.x", "1.1.3", false),
+        ("1.2.x", "1.1.3", false),
+        ("1.2.x || 2.x", "1.1.3", false),
+        ("2.*.*", "1.1.3", false),
+        ("1.2.* || 2.*", "1.1.3", false),
+        ("2", "1.9999.9999", false),
+        ("2.3", "2.2.1", false),
+        ("~>3.2.1", "2.3.2", false),
+        ("~>1", "0.2.3", false),
+        ("~1.0", "0.0.0", false),
+        (">1", "1.0.0", false),
+        ("2", "1.0.0beta", false),
+        (">1", "1.0.0beta", false),
+        ("> 1", "1.0.0beta", false),
+        ("=0.7.x", "0.6.2", false),
+        ("=0.7.x", "0.7.0-asdf", false),
+        ("^1", "1.0.0-0", false),
+        (">=0.7.x", "0.7.0-asdf", false),
+        ("1", "1.0.0beta", false),
+        (">=0.7.x", "0.6.2", false),
+        (">1.2.3", "1.3.0-alpha", false),
+    ];
+
+    const VERSION_NOT_LT_RANGE: &[(&str, &str, bool)] = &[
+        ("~ 1.0", "1.1.0", false),
+        ("~0.6.1-1", "0.6.1-1", false),
+        ("1.0.0 - 2.0.0", "1.2.3", false),
+        ("1.0.0 - 2.0.0", "2.9.9", false),
+        ("1.0.0", "1.0.0", false),
+        (">=*", "0.2.4", false),
+        ("", "1.0.0", false),
+        ("*", "1.2.3", false),
+        (">=1.0.0", "1.0.0", false),
+        (">=1.0.0", "1.0.1", false),
+        (">=1.0.0", "1.1.0", false),
+        (">1.0.0", "1.0.1", false),
+        (">1.0.0", "1.1.0", false),
+        ("<=2.0.0", "2.0.0", false),
+        ("<=2.0.0", "1.9999.9999", false),
+        ("<=2.0.0", "0.2.9", false),
+        ("<2.0.0", "1.9999.9999", false),
+        ("<2.0.0", "0.2.9", false),
+        (">= 1.0.0", "1.0.0", false),
+        (">=  1.0.0", "1.0.1", false),
+        (">=   1.0.0", "1.1.0", false),
+        ("> 1.0.0", "1.0.1", false),
+        (">  1.0.0", "1.1.0", false),
+        ("<=   2.0.0", "2.0.0", false),
+        ("<= 2.0.0", "1.9999.9999", false),
+        ("<=  2.0.0", "0.2.9", false),
+        ("<    2.0.0", "1.9999.9999", false),
+        ("<\t2.0.0", "0.2.9", false),
+        (">=0.1.97", "v0.1.97", false),
+        (">=0.1.97", "0.1.97", false),
+        ("0.1.20 || 1.2.4", "1.2.4", false),
+        ("0.1.20 || >1.2.4", "1.2.4", false),
+        ("0.1.20 || 1.2.4", "1.2.3", false),
+        ("0.1.20 || 1.2.4", "0.1.20", false),
+        (">=0.2.3 || <0.0.1", "0.0.0", false),
+        (">=0.2.3 || <0.0.1", "0.2.3", false),
+        (">=0.2.3 || <0.0.1", "0.2.4", false),
+        ("||", "1.3.4", false),
+        ("2.x.x", "2.1.3", false),
+        ("1.2.x", "1.2.3", false),
+        ("1.2.x || 2.x", "2.1.3", false),
+        ("1.2.x || 2.x", "1.2.3", false),
+        ("x", "1.2.3", false),
+        ("2.*.*", "2.1.3", false),
+        ("1.2.*", "1.2.3", false),
+        ("1.2.* || 2.*", "2.1.3", false),
+        ("1.2.* || 2.*", "1.2.3", false),
+        ("2", "2.1.2", false),
+        ("2.3", "2.3.1", false),
+        ("~2.4", "2.4.0", false),
+        ("~2.4", "2.4.5", false),
+        ("~>3.2.1", "3.2.2", false),
+        ("~1", "1.2.3", false),
+        ("~>1", "1.2.3", false),
+        ("~> 1", "1.2.3", false),
+        ("~1.0", "1.0.2", false),
+        ("~ 1.0", "1.0.2", false),
+        (">=1", "1.0.0", false),
+        (">= 1", "1.0.0", false),
+        ("<1.2", "1.1.1", false),
+        ("< 1.2", "1.1.1", false),
+        ("~v0.5.4-pre", "0.5.5", false),
+        ("~v0.5.4-pre", "0.5.4", false),
+        ("=0.7.x", "0.7.2", false),
+        (">=0.7.x", "0.7.2", false),
+        ("<=0.7.x", "0.6.2", false),
+        (">0.2.3 >0.2.4 <=0.2.5", "0.2.5", false),
+        (">=0.2.3 <=0.2.4", "0.2.4", false),
+        ("1.0.0 - 2.0.0", "2.0.0", false),
+        ("^3.0.0", "4.0.0", false),
+        ("^1.0.0 || ~2.0.1", "2.0.0", false),
+        ("^0.1.0 || ~3.0.1 || 5.0.0", "3.2.0", false),
+        ("^0.1.0 || ~3.0.1 || 5.0.0", "1.0.0beta", false),
+        ("^0.1.0 || ~3.0.1 || 5.0.0", "5.0.0-0", false),
+        ("^0.1.0 || ~3.0.1 || >4 <=5.0.0", "3.5.0", false),
+        ("^1.0.0alpha", "1.0.0beta", false),
+        ("~1.0.0alpha", "1.0.0beta", false),
+        ("^1.0.0-alpha", "1.0.0beta", false),
+        ("~1.0.0-alpha", "1.0.0beta", false),
+        ("^1.0.0-alpha", "1.0.0-beta", false),
+        ("~1.0.0-alpha", "1.0.0-beta", false),
+        ("=0.1.0", "1.0.0", false),
+        (">1.2.3", "1.3.0-alpha", true),
+    ];
+
+    fn assert_outside(
+        cases: &[(&str, &str, bool)],
+        direction: OutsideDirection,
+        include_prerelease: bool,
+        expected: bool,
+    ) {
+        for (range, version, explicit_include) in cases {
+            let include_prerelease = include_prerelease || *explicit_include;
+            let range = Range::parse(range).unwrap();
+            let version = Version::parse(version).unwrap();
+
+            let result = range
+                .outside(&version, direction, include_prerelease)
+                .expect("outside should always have comparator bounds");
+            let message = format!(
+                "{}outside({}, {}, {}, include_prerelease={})",
+                if expected { "" } else { "!" },
+                version,
+                range,
+                direction,
+                include_prerelease
+            );
+
+            if expected {
+                assert!(result, "{}", message);
+            } else {
+                assert!(!result, "{}", message);
+            }
+        }
+    }
+
+    #[test]
+    fn greater_than_range() {
+        assert_outside(VERSION_GT_RANGE, OutsideDirection::Higher, false, true);
+    }
+
+    #[test]
+    fn less_than_range() {
+        assert_outside(VERSION_LT_RANGE, OutsideDirection::Lower, false, true);
+    }
+
+    #[test]
+    fn not_greater_than_range() {
+        assert_outside(VERSION_NOT_GT_RANGE, OutsideDirection::Higher, false, false);
+    }
+
+    #[test]
+    fn not_less_than_range() {
+        assert_outside(VERSION_NOT_LT_RANGE, OutsideDirection::Lower, false, false);
+    }
+
+    #[test]
+    fn outside_with_bad_direction_returns_error() {
+        let range = Range::parse(">1.5.0").unwrap();
+        let version = Version::parse("1.2.3").unwrap();
+
+        let result = OutsideDirection::try_from('x')
+            .and_then(|direction| range.outside(&version, direction, false));
+
+        assert!(matches!(
+            result,
+            Err(RangeError::InvalidOutsideDirection('x'))
+        ));
     }
 }
 
