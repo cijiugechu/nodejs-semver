@@ -1011,7 +1011,6 @@ mod tests {
     use super::*;
 
     use pretty_assertions::assert_eq;
-    use serde_json::Value;
 
     #[derive(Debug)]
     struct IncrementCase {
@@ -1022,6 +1021,475 @@ mod tests {
         identifier_base: Option<IdentifierBase>,
     }
 
+    #[derive(Debug)]
+    struct IncrementCaseRaw {
+        version: &'static str,
+        release: &'static str,
+        expected: Option<&'static str>,
+        identifier: Option<&'static str>,
+        identifier_base: Option<IdentifierBase>,
+    }
+
+    macro_rules! ic {
+        ($v:literal, $r:literal, $e:literal) => {
+            IncrementCaseRaw {
+                version: $v,
+                release: $r,
+                expected: Some($e),
+                identifier: None,
+                identifier_base: None,
+            }
+        };
+        ($v:literal, $r:literal, None) => {
+            IncrementCaseRaw {
+                version: $v,
+                release: $r,
+                expected: None,
+                identifier: None,
+                identifier_base: None,
+            }
+        };
+        ($v:literal, $r:literal, $e:literal, $id:literal) => {
+            IncrementCaseRaw {
+                version: $v,
+                release: $r,
+                expected: Some($e),
+                identifier: Some($id),
+                identifier_base: None,
+            }
+        };
+        ($v:literal, $r:literal, None, $id:literal) => {
+            IncrementCaseRaw {
+                version: $v,
+                release: $r,
+                expected: None,
+                identifier: Some($id),
+                identifier_base: None,
+            }
+        };
+        ($v:literal, $r:literal, $e:literal, $id:literal, $base:expr) => {
+            IncrementCaseRaw {
+                version: $v,
+                release: $r,
+                expected: Some($e),
+                identifier: Some($id),
+                identifier_base: Some($base),
+            }
+        };
+        ($v:literal, $r:literal, None, $id:literal, $base:expr) => {
+            IncrementCaseRaw {
+                version: $v,
+                release: $r,
+                expected: None,
+                identifier: Some($id),
+                identifier_base: Some($base),
+            }
+        };
+    }
+
+    // Generated from node-semver/test/fixtures/increments.js so tests don't rely on external JS fixtures.
+    static INCREMENT_CASES: &[IncrementCaseRaw] = &[
+        ic!("1.2.3", "major", "2.0.0"),
+        ic!("1.2.3", "minor", "1.3.0"),
+        ic!("1.2.3", "patch", "1.2.4"),
+        ic!("1.2.3tag", "major", "2.0.0"),
+        ic!("1.2.3-tag", "major", "2.0.0"),
+        ic!("1.2.3", "fake", None),
+        ic!("1.2.0-0", "patch", "1.2.0"),
+        ic!("fake", "major", None),
+        ic!("1.2.3-4", "major", "2.0.0"),
+        ic!("1.2.3-4", "minor", "1.3.0"),
+        ic!("1.2.3-4", "patch", "1.2.3"),
+        ic!("1.2.3-alpha.0.beta", "major", "2.0.0"),
+        ic!("1.2.3-alpha.0.beta", "minor", "1.3.0"),
+        ic!("1.2.3-alpha.0.beta", "patch", "1.2.3"),
+        ic!("1.2.4", "prerelease", "1.2.5-0"),
+        ic!("1.2.3-0", "prerelease", "1.2.3-1"),
+        ic!("1.2.3-alpha.0", "prerelease", "1.2.3-alpha.1"),
+        ic!("1.2.3-alpha.1", "prerelease", "1.2.3-alpha.2"),
+        ic!("1.2.3-alpha.2", "prerelease", "1.2.3-alpha.3"),
+        ic!("1.2.3-alpha.0.beta", "prerelease", "1.2.3-alpha.1.beta"),
+        ic!("1.2.3-alpha.1.beta", "prerelease", "1.2.3-alpha.2.beta"),
+        ic!("1.2.3-alpha.2.beta", "prerelease", "1.2.3-alpha.3.beta"),
+        ic!(
+            "1.2.3-alpha.10.0.beta",
+            "prerelease",
+            "1.2.3-alpha.10.1.beta"
+        ),
+        ic!(
+            "1.2.3-alpha.10.1.beta",
+            "prerelease",
+            "1.2.3-alpha.10.2.beta"
+        ),
+        ic!(
+            "1.2.3-alpha.10.2.beta",
+            "prerelease",
+            "1.2.3-alpha.10.3.beta"
+        ),
+        ic!(
+            "1.2.3-alpha.10.beta.0",
+            "prerelease",
+            "1.2.3-alpha.10.beta.1"
+        ),
+        ic!(
+            "1.2.3-alpha.10.beta.1",
+            "prerelease",
+            "1.2.3-alpha.10.beta.2"
+        ),
+        ic!(
+            "1.2.3-alpha.10.beta.2",
+            "prerelease",
+            "1.2.3-alpha.10.beta.3"
+        ),
+        ic!("1.2.3-alpha.9.beta", "prerelease", "1.2.3-alpha.10.beta"),
+        ic!("1.2.3-alpha.10.beta", "prerelease", "1.2.3-alpha.11.beta"),
+        ic!("1.2.3-alpha.11.beta", "prerelease", "1.2.3-alpha.12.beta"),
+        ic!("1.0.0", "prepatch", "1.0.1-alpha.1.1a.0", "alpha.1.1a"),
+        ic!("1.2.0", "prepatch", "1.2.1-0"),
+        ic!("1.2.0-1", "prepatch", "1.2.1-0"),
+        ic!("1.2.0", "preminor", "1.3.0-0"),
+        ic!("1.2.3-1", "preminor", "1.3.0-0"),
+        ic!("1.2.0", "premajor", "2.0.0-0"),
+        ic!("1.2.3-1", "premajor", "2.0.0-0"),
+        ic!("1.2.0-1", "minor", "1.2.0"),
+        ic!("1.0.0-1", "major", "1.0.0"),
+        ic!("1.0.0-1", "release", "1.0.0"),
+        ic!("1.2.0-1", "release", "1.2.0"),
+        ic!("1.2.3-1", "release", "1.2.3"),
+        ic!("1.2.3", "release", None),
+        ic!("1.2.3", "major", "2.0.0", "dev"),
+        ic!("1.2.3", "minor", "1.3.0", "dev"),
+        ic!("1.2.3", "patch", "1.2.4", "dev"),
+        ic!("1.2.3tag", "major", "2.0.0", "dev"),
+        ic!("1.2.3-tag", "major", "2.0.0", "dev"),
+        ic!("1.2.3", "fake", None, "dev"),
+        ic!("1.2.0-0", "patch", "1.2.0", "dev"),
+        ic!("fake", "major", None, "dev"),
+        ic!("1.2.3-4", "major", "2.0.0", "dev"),
+        ic!("1.2.3-4", "minor", "1.3.0", "dev"),
+        ic!("1.2.3-4", "patch", "1.2.3", "dev"),
+        ic!("1.2.3-alpha.0.beta", "major", "2.0.0", "dev"),
+        ic!("1.2.3-alpha.0.beta", "minor", "1.3.0", "dev"),
+        ic!("1.2.3-alpha.0.beta", "patch", "1.2.3", "dev"),
+        ic!("1.2.4", "prerelease", "1.2.5-dev.0", "dev"),
+        ic!("1.2.3-0", "prerelease", "1.2.3-dev.0", "dev"),
+        ic!("1.2.3-alpha.0", "prerelease", "1.2.3-dev.0", "dev"),
+        ic!("1.2.3-alpha.0", "prerelease", "1.2.3-alpha.1", "alpha"),
+        ic!("1.2.3-alpha.0.beta", "prerelease", "1.2.3-dev.0", "dev"),
+        ic!(
+            "1.2.3-alpha.0.beta",
+            "prerelease",
+            "1.2.3-alpha.1.beta",
+            "alpha"
+        ),
+        ic!("1.2.3-alpha.10.0.beta", "prerelease", "1.2.3-dev.0", "dev"),
+        ic!(
+            "1.2.3-alpha.10.0.beta",
+            "prerelease",
+            "1.2.3-alpha.10.1.beta",
+            "alpha"
+        ),
+        ic!(
+            "1.2.3-alpha.10.1.beta",
+            "prerelease",
+            "1.2.3-alpha.10.2.beta",
+            "alpha"
+        ),
+        ic!(
+            "1.2.3-alpha.10.2.beta",
+            "prerelease",
+            "1.2.3-alpha.10.3.beta",
+            "alpha"
+        ),
+        ic!("1.2.3-alpha.10.beta.0", "prerelease", "1.2.3-dev.0", "dev"),
+        ic!(
+            "1.2.3-alpha.10.beta.0",
+            "prerelease",
+            "1.2.3-alpha.10.beta.1",
+            "alpha"
+        ),
+        ic!(
+            "1.2.3-alpha.10.beta.1",
+            "prerelease",
+            "1.2.3-alpha.10.beta.2",
+            "alpha"
+        ),
+        ic!(
+            "1.2.3-alpha.10.beta.2",
+            "prerelease",
+            "1.2.3-alpha.10.beta.3",
+            "alpha"
+        ),
+        ic!("1.2.3-alpha.9.beta", "prerelease", "1.2.3-dev.0", "dev"),
+        ic!(
+            "1.2.3-alpha.9.beta",
+            "prerelease",
+            "1.2.3-alpha.10.beta",
+            "alpha"
+        ),
+        ic!(
+            "1.2.3-alpha.10.beta",
+            "prerelease",
+            "1.2.3-alpha.11.beta",
+            "alpha"
+        ),
+        ic!(
+            "1.2.3-alpha.11.beta",
+            "prerelease",
+            "1.2.3-alpha.12.beta",
+            "alpha"
+        ),
+        ic!("1.2.0", "prepatch", "1.2.1-dev.0", "dev"),
+        ic!("1.2.0-1", "prepatch", "1.2.1-dev.0", "dev"),
+        ic!("1.2.0", "preminor", "1.3.0-dev.0", "dev"),
+        ic!("1.2.3-1", "preminor", "1.3.0-dev.0", "dev"),
+        ic!("1.2.0", "premajor", "2.0.0-dev.0", "dev"),
+        ic!("1.2.3-1", "premajor", "2.0.0-dev.0", "dev"),
+        ic!(
+            "1.2.3-1",
+            "premajor",
+            "2.0.0-dev.1",
+            "dev",
+            IdentifierBase::Value(1)
+        ),
+        ic!("1.2.0-1", "minor", "1.2.0", "dev"),
+        ic!("1.0.0-1", "major", "1.0.0", "dev"),
+        ic!("1.2.3-dev.bar", "prerelease", "1.2.3-dev.0", "dev"),
+        ic!("1.2.3-0", "prerelease", "1.2.3-1.0", "1"),
+        ic!("1.2.3-1.0", "prerelease", "1.2.3-1.1", "1"),
+        ic!("1.2.3-1.1", "prerelease", "1.2.3-1.2", "1"),
+        ic!("1.2.3-1.1", "prerelease", "1.2.3-2.0", "2"),
+        ic!(
+            "1.2.0-1",
+            "prerelease",
+            "1.2.0-alpha.0",
+            "alpha",
+            IdentifierBase::Value(0)
+        ),
+        ic!(
+            "1.2.1",
+            "prerelease",
+            "1.2.2-alpha.0",
+            "alpha",
+            IdentifierBase::Value(0)
+        ),
+        ic!(
+            "0.2.0",
+            "prerelease",
+            "0.2.1-alpha.0",
+            "alpha",
+            IdentifierBase::Value(0)
+        ),
+        ic!(
+            "1.2.2",
+            "prerelease",
+            "1.2.3-alpha.1",
+            "alpha",
+            IdentifierBase::Value(1)
+        ),
+        ic!(
+            "1.2.3",
+            "prerelease",
+            "1.2.4-alpha.1",
+            "alpha",
+            IdentifierBase::Value(1)
+        ),
+        ic!(
+            "1.2.4",
+            "prerelease",
+            "1.2.5-alpha.1",
+            "alpha",
+            IdentifierBase::Value(1)
+        ),
+        ic!(
+            "1.2.0",
+            "prepatch",
+            "1.2.1-dev.1",
+            "dev",
+            IdentifierBase::Value(1)
+        ),
+        ic!(
+            "1.2.0-1",
+            "prepatch",
+            "1.2.1-dev.1",
+            "dev",
+            IdentifierBase::Value(1)
+        ),
+        ic!(
+            "1.2.0",
+            "premajor",
+            "2.0.0-dev.0",
+            "dev",
+            IdentifierBase::Value(0)
+        ),
+        ic!(
+            "1.2.3-1",
+            "premajor",
+            "2.0.0-dev.0",
+            "dev",
+            IdentifierBase::Value(0)
+        ),
+        ic!(
+            "1.2.3-dev.bar",
+            "prerelease",
+            "1.2.3-dev.0",
+            "dev",
+            IdentifierBase::Value(0)
+        ),
+        ic!(
+            "1.2.3-dev.bar",
+            "prerelease",
+            "1.2.3-dev.1",
+            "dev",
+            IdentifierBase::Value(1)
+        ),
+        ic!(
+            "1.2.3-dev.bar",
+            "prerelease",
+            "1.2.3-dev.bar.0",
+            "",
+            IdentifierBase::Value(0)
+        ),
+        ic!(
+            "1.2.3-dev.bar",
+            "prerelease",
+            "1.2.3-dev.bar.1",
+            "",
+            IdentifierBase::Value(1)
+        ),
+        ic!(
+            "1.2.0",
+            "preminor",
+            "1.3.0-dev.1",
+            "dev",
+            IdentifierBase::Value(1)
+        ),
+        ic!("1.2.3-1", "preminor", "1.3.0-dev.0", "dev"),
+        ic!(
+            "1.2.0",
+            "prerelease",
+            "1.2.1-1",
+            "",
+            IdentifierBase::Value(1)
+        ),
+        ic!(
+            "1.2.0-1",
+            "prerelease",
+            "1.2.0-alpha",
+            "alpha",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.1",
+            "prerelease",
+            "1.2.2-alpha",
+            "alpha",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.2",
+            "prerelease",
+            "1.2.3-alpha",
+            "alpha",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.0",
+            "prepatch",
+            "1.2.1-dev",
+            "dev",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.0-1",
+            "prepatch",
+            "1.2.1-dev",
+            "dev",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.0",
+            "premajor",
+            "2.0.0-dev",
+            "dev",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.3-1",
+            "premajor",
+            "2.0.0-dev",
+            "dev",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.3-dev.bar",
+            "prerelease",
+            "1.2.3-dev",
+            "dev",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.3-dev.bar",
+            "prerelease",
+            "1.2.3-dev.baz",
+            "dev.baz",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.0",
+            "preminor",
+            "1.3.0-dev",
+            "dev",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.3-1",
+            "preminor",
+            "1.3.0-dev",
+            "dev",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.3-dev",
+            "prerelease",
+            None,
+            "dev",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.0-dev",
+            "premajor",
+            "2.0.0-dev",
+            "dev",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.0-dev",
+            "preminor",
+            "1.3.0-beta",
+            "beta",
+            IdentifierBase::False
+        ),
+        ic!(
+            "1.2.0-dev",
+            "prepatch",
+            "1.2.1-dev",
+            "dev",
+            IdentifierBase::False
+        ),
+        ic!("1.2.0", "prerelease", None, "", IdentifierBase::False),
+        ic!(
+            "1.0.0-rc.1+build.4",
+            "prerelease",
+            "1.0.0-rc.2",
+            "rc",
+            IdentifierBase::False
+        ),
+        ic!("1.2.0", "prerelease", None, "invalid/preid"),
+        ic!("1.2.0", "prerelease", None, "invalid+build"),
+        ic!("1.2.0beta", "prerelease", None, "invalid/preid"),
+    ];
+
     fn version_without_build(version: &Version) -> String {
         let mut output = format!("{}.{}.{}", version.major, version.minor, version.patch);
         if !version.pre_release.is_empty() {
@@ -1031,84 +1499,17 @@ mod tests {
         output
     }
 
-    fn parse_identifier_base_value(value: &Value) -> Option<IdentifierBase> {
-        match value {
-            Value::Bool(false) => Some(IdentifierBase::False),
-            Value::Bool(true) => Some(IdentifierBase::Value(1)),
-            Value::Number(num) => num.as_u64().map(IdentifierBase::Value),
-            Value::String(s) => s.parse::<u64>().ok().map(IdentifierBase::Value),
-            Value::Null => None,
-            _ => None,
-        }
-    }
-
-    fn parse_increment_entry(entry: Value) -> IncrementCase {
-        let arr = entry
-            .as_array()
-            .unwrap_or_else(|| panic!("fixture entry must be an array: {entry:?}"));
-
-        let version = arr
-            .get(0)
-            .and_then(Value::as_str)
-            .unwrap_or_else(|| panic!("missing version in fixture: {arr:?}"))
-            .to_string();
-        let release = arr
-            .get(1)
-            .and_then(Value::as_str)
-            .unwrap_or_else(|| panic!("missing release in fixture: {arr:?}"))
-            .to_string();
-        let expected = arr.get(2).and_then(Value::as_str).map(str::to_string);
-
-        let options = arr.get(3);
-        let (identifier, identifier_base_value) = if let Some(Value::String(s)) = options {
-            (Some(s.to_string()), arr.get(4).cloned())
-        } else {
-            (
-                arr.get(4).and_then(Value::as_str).map(str::to_string),
-                arr.get(5).cloned(),
-            )
-        };
-
-        let identifier_base = identifier_base_value
-            .as_ref()
-            .and_then(parse_identifier_base_value);
-
-        IncrementCase {
-            version,
-            release,
-            expected,
-            identifier,
-            identifier_base,
-        }
-    }
-
     fn load_increment_cases() -> Vec<IncrementCase> {
-        let raw = include_str!("../node-semver/test/fixtures/increments.js");
-        let cleaned = raw
-            .lines()
-            .filter(|line| !line.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let start = cleaned
-            .find('[')
-            .expect("expected array start in fixture file");
-        let end = cleaned
-            .rfind(']')
-            .expect("expected array end in fixture file");
-
-        let mut jsonish = cleaned[start..=end].to_string();
-        jsonish = jsonish.replace('\'', "\"");
-        jsonish = jsonish.replace("loose:", "\"loose\":");
-        jsonish = jsonish.replace(",\n]", "\n]");
-        jsonish = jsonish.replace(",]", "]");
-
-        let fixtures: Vec<Value> =
-            serde_json::from_str(&jsonish).expect("failed to parse increment fixtures");
-        fixtures
-            .into_iter()
-            .map(parse_increment_entry)
-            .collect::<Vec<_>>()
+        INCREMENT_CASES
+            .iter()
+            .map(|raw| IncrementCase {
+                version: raw.version.to_string(),
+                release: raw.release.to_string(),
+                expected: raw.expected.map(str::to_string),
+                identifier: raw.identifier.map(str::to_string),
+                identifier_base: raw.identifier_base,
+            })
+            .collect()
     }
 
     #[test]
