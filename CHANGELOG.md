@@ -1,5 +1,30 @@
 # `nodejs-semver` Release Changelog
 
+<a name="4.2.0"></a>
+## 4.2.0 (2025-11-27)
+
+### Features
+
+* **version:** implement `inc` ([73547a1](https://github.com/cijiugechu/nodejs-semver/commit/73547a1edb25f846ee43976835e151b8c79da57b)) 
+
+* **range:** implement `outside` ([eb5b36f](https://github.com/cijiugechu/nodejs-semver/commit/eb5b36f4fb4ec5a61ab2c262ddef0762482c11ed)) 
+
+### Performance
+
+* **range:** inline `outside` comparisons by specializing helpers ([e933faf](https://github.com/cijiugechu/nodejs-semver/commit/e933faf317ae61da3fc20d519f8608d2a6fc949f)) 
+
+* **range:** remove unnecessary `collect()` ([6bcbbb7](https://github.com/cijiugechu/nodejs-semver/commit/6bcbbb7c6319c6de430b9ce0ad46b03e55933ac0)) 
+
+### Miscellaneous Tasks
+
+* **deps:** bump deps ([e0179f1](https://github.com/cijiugechu/nodejs-semver/commit/e0179f1949bbdb1b7561ad6df9c7f2a79632c0d7))
+
+* **clippy:** make clippy happy ([9013a4c](https://github.com/cijiugechu/nodejs-semver/commit/9013a4cbe87ed4eafc103cac376b7a0681450f57))
+
+* **deps:** bump `winnow` ([0185b2f](https://github.com/cijiugechu/nodejs-semver/commit/0185b2f5a9c58623db2f3b37210209cc6321c9c8))
+
+* **deps:** bump `miette` ([7f64b85](https://github.com/cijiugechu/nodejs-semver/commit/7f64b85eb32119549ba902578d393d610f347db0)) 
+
 <a name="4.1.0"></a>
 ## 4.1.0 (2024-11-05)
 
@@ -158,4 +183,3 @@ asap!
 * **error:** upgrade miette and change error API a bit ([82625fd3](https://github.com/felipesere/node-semver-rs/commit/82625fd37384cc24469a55e28a8c8d310e619276))
     * **BREAKING CHANGE**: This changes the error API a bit. You may need to update code that handles errors by hand
 * **version:** add .satisfies() method to Version ([da70b187](https://github.com/felipesere/node-semver-rs/commit/da70b1872bdd6f910d56d6b1c674d0c3dabdeaf6))
-
