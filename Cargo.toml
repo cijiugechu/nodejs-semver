@@ -14,17 +14,17 @@ rust-version = "1.70.0"
 edition = "2021"
 
 [dependencies]
-miette = "7.4"
+miette = "7.6"
 winnow = "0.7"
-thiserror = "1.0.63"
-bytecount = "0.6.8"
-serde = { version = "1.0.204", features = ["derive"], optional = true }
+thiserror = "2.0"
+bytecount = "0.6.9"
+serde = { version = "1.0.228", features = ["derive"], optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
 criterion         = {  version = "0.5.1", features = ["html_reports"] }
 serde_json        = "1.0"
-serde = { version = "1.0.204", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
 
 [features]
 default = []
