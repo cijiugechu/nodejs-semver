@@ -12,10 +12,10 @@ use thiserror::Error;
 
 use winnow::ascii::{digit1, space0};
 use winnow::combinator::{alt, opt, preceded, separated};
-use winnow::error::{AddContext, ErrMode, ErrorKind, FromExternalError, ParserError};
+use winnow::error::{AddContext, ErrMode, FromExternalError, ParserError};
 use winnow::stream::{AsChar, Stream};
 use winnow::token::{literal, take_while};
-use winnow::{PResult, Parser};
+use winnow::{ModalResult, Parser};
 
 pub use range::*;
 
@@ -197,7 +197,9 @@ struct SemverParseError<I> {
 }
 
 impl<I: Clone + Stream> ParserError<I> for SemverParseError<I> {
-    fn from_error_kind(input: &I, _kind: winnow::error::ErrorKind) -> Self {
+    type Inner = Self;
+
+    fn from_input(input: &I) -> Self {
         Self {
             input: input.clone(),
             context: None,
@@ -209,13 +211,16 @@ impl<I: Clone + Stream> ParserError<I> for SemverParseError<I> {
         self,
         input: &I,
         _token_start: &<I as Stream>::Checkpoint,
-        _kind: winnow::error::ErrorKind,
     ) -> Self {
         Self {
             input: input.clone(),
             context: self.context,
             kind: self.kind,
         }
+    }
+
+    fn into_inner(self) -> Result<Self::Inner, Self> {
+        Ok(self)
     }
 }
 
@@ -235,11 +240,7 @@ impl<I: Stream> AddContext<I> for SemverParseError<I> {
 }
 
 impl<'a> FromExternalError<&'a str, SemverParseError<&'a str>> for SemverParseError<&'a str> {
-    fn from_external_error(
-        _input: &&'a str,
-        _kind: ErrorKind,
-        e: SemverParseError<&'a str>,
-    ) -> Self {
+    fn from_external_error(_input: &&'a str, e: SemverParseError<&'a str>) -> Self {
         e
     }
 }
@@ -869,7 +870,7 @@ impl Extras {
 ///                 | <version core> "-" <pre-release>
 ///                 | <version core> "+" <build>
 ///                 | <version core> "-" <pre-release> "+" <build>
-fn version<'s>(input: &mut &'s str) -> PResult<Version, SemverParseError<&'s str>> {
+fn version<'s>(input: &mut &'s str) -> ModalResult<Version, SemverParseError<&'s str>> {
     (
         opt(alt((literal("v"), literal("V")))),
         space0,
@@ -891,7 +892,7 @@ fn version<'s>(input: &mut &'s str) -> PResult<Version, SemverParseError<&'s str
 
 fn extras<'s>(
     input: &mut &'s str,
-) -> PResult<(Vec<Identifier>, Vec<Identifier>), SemverParseError<&'s str>> {
+) -> ModalResult<(Vec<Identifier>, Vec<Identifier>), SemverParseError<&'s str>> {
     Parser::map(
         opt(alt((
             Parser::map((pre_release, build), Extras::ReleaseAndBuild),
@@ -907,7 +908,7 @@ fn extras<'s>(
 }
 
 /// <version core> ::= <major> "." <minor> "." <patch>
-fn version_core<'s>(input: &mut &'s str) -> PResult<(u64, u64, u64), SemverParseError<&'s str>> {
+fn version_core<'s>(input: &mut &'s str) -> ModalResult<(u64, u64, u64), SemverParseError<&'s str>> {
     (number, literal("."), number, literal("."), number)
         .map(|(major, _, minor, _, patch)| (major, minor, patch))
         .context("version core")
@@ -915,19 +916,19 @@ fn version_core<'s>(input: &mut &'s str) -> PResult<(u64, u64, u64), SemverParse
 }
 
 // I believe build, pre_release, and identifier are not 100% spec compliant.
-fn build<'s>(input: &mut &'s str) -> PResult<Vec<Identifier>, SemverParseError<&'s str>> {
+fn build<'s>(input: &mut &'s str) -> ModalResult<Vec<Identifier>, SemverParseError<&'s str>> {
     preceded(literal("+"), separated(1.., identifier, literal(".")))
         .context("build version")
         .parse_next(input)
 }
 
-fn pre_release<'s>(input: &mut &'s str) -> PResult<Vec<Identifier>, SemverParseError<&'s str>> {
+fn pre_release<'s>(input: &mut &'s str) -> ModalResult<Vec<Identifier>, SemverParseError<&'s str>> {
     preceded(opt(literal("-")), separated(1.., identifier, literal(".")))
         .context("pre_release version")
         .parse_next(input)
 }
 
-fn identifier<'s>(input: &mut &'s str) -> PResult<Identifier, SemverParseError<&'s str>> {
+fn identifier<'s>(input: &mut &'s str) -> ModalResult<Identifier, SemverParseError<&'s str>> {
     Parser::map(
         take_while(1.., |x: char| AsChar::is_alphanum(x as u8) || x == '-'),
         |s: &str| {
@@ -980,7 +981,7 @@ fn compare_identifier_and_str(existing: &Identifier, other: &str) -> Ordering {
     }
 }
 
-pub(crate) fn number<'s>(input: &mut &'s str) -> PResult<u64, SemverParseError<&'s str>> {
+pub(crate) fn number<'s>(input: &mut &'s str) -> ModalResult<u64, SemverParseError<&'s str>> {
     #[allow(suspicious_double_ref_op)]
     let copied = input.clone();
 

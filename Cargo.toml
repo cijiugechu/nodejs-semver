@@ -15,7 +15,7 @@ edition = "2021"
 
 [dependencies]
 miette = "7.4"
-winnow = "0.6"
+winnow = "0.7"
 thiserror = "1.0.63"
 bytecount = "0.6.8"
 serde = { version = "1.0.204", features = ["derive"], optional = true }
