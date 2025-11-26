@@ -279,6 +279,69 @@ pub enum VersionDiff {
 /// difference between two versions
 pub type ReleaseType = VersionDiff;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentifierBase {
+    /// Mirrors `identifierBase === false` in node-semver.
+    False,
+    /// Any other truthy/falsy value. Only the zero/non-zero nature matters.
+    Value(u64),
+}
+
+impl Default for IdentifierBase {
+    fn default() -> Self {
+        IdentifierBase::Value(0)
+    }
+}
+
+impl IdentifierBase {
+    fn base_value(self) -> u64 {
+        match self {
+            IdentifierBase::False => 0,
+            IdentifierBase::Value(v) => {
+                if v == 0 {
+                    0
+                } else {
+                    1
+                }
+            }
+        }
+    }
+}
+
+impl From<bool> for IdentifierBase {
+    fn from(value: bool) -> Self {
+        if value {
+            IdentifierBase::Value(1)
+        } else {
+            IdentifierBase::False
+        }
+    }
+}
+
+impl From<u64> for IdentifierBase {
+    fn from(value: u64) -> Self {
+        IdentifierBase::Value(value)
+    }
+}
+
+impl From<usize> for IdentifierBase {
+    fn from(value: usize) -> Self {
+        IdentifierBase::Value(value as u64)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum IncrementError {
+    #[error("invalid identifier: {0}")]
+    InvalidIdentifier(String),
+    #[error("invalid increment argument: {0}")]
+    InvalidIncrementArgument(String),
+    #[error("version {0} is not a prerelease")]
+    NotAPrerelease(String),
+    #[error("increment would overflow a version component")]
+    Overflow,
+}
+
 impl fmt::Display for VersionDiff {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -336,6 +399,175 @@ impl Version {
     /// True is this [Version] has a prerelease component.
     pub fn is_prerelease(&self) -> bool {
         !self.pre_release.is_empty()
+    }
+
+    /// Increment this [Version] according to the given release type, returning a new [Version].
+    ///
+    /// Mirrors the behavior of the `SemVer.inc` method in node-semver.
+    pub fn inc(
+        &self,
+        release: &str,
+        identifier: Option<&str>,
+        identifier_base: Option<IdentifierBase>,
+    ) -> Result<Version, IncrementError> {
+        let mut cloned = self.clone();
+        cloned.inc_mut(release, identifier, identifier_base)?;
+        Ok(cloned)
+    }
+
+    fn inc_mut(
+        &mut self,
+        release: &str,
+        identifier: Option<&str>,
+        identifier_base: Option<IdentifierBase>,
+    ) -> Result<&mut Self, IncrementError> {
+        let identifier_base = identifier_base.unwrap_or_default();
+        let identifier_base_is_false = identifier_base == IdentifierBase::False;
+        let identifier = identifier.and_then(|id| {
+            if id.is_empty() {
+                None
+            } else {
+                Some(id.to_string())
+            }
+        });
+
+        if release.starts_with("pre") {
+            if identifier.is_none() && identifier_base_is_false {
+                return Err(IncrementError::InvalidIncrementArgument(
+                    "identifier is empty".into(),
+                ));
+            }
+            if let Some(id) = identifier.as_deref() {
+                if !is_valid_prerelease_identifier(id) {
+                    return Err(IncrementError::InvalidIdentifier(id.to_string()));
+                }
+            }
+        }
+
+        match release {
+            "premajor" => {
+                self.pre_release.clear();
+                self.patch = 0;
+                self.minor = 0;
+                self.major = self.major.checked_add(1).ok_or(IncrementError::Overflow)?;
+                self.inc_mut("pre", identifier.as_deref(), Some(identifier_base))?;
+            }
+            "preminor" => {
+                self.pre_release.clear();
+                self.patch = 0;
+                self.minor = self.minor.checked_add(1).ok_or(IncrementError::Overflow)?;
+                self.inc_mut("pre", identifier.as_deref(), Some(identifier_base))?;
+            }
+            "prepatch" => {
+                self.pre_release.clear();
+                self.inc_mut("patch", identifier.as_deref(), Some(identifier_base))?;
+                self.inc_mut("pre", identifier.as_deref(), Some(identifier_base))?;
+            }
+            "prerelease" => {
+                if self.pre_release.is_empty() {
+                    self.inc_mut("patch", identifier.as_deref(), Some(identifier_base))?;
+                }
+                self.inc_mut("pre", identifier.as_deref(), Some(identifier_base))?;
+            }
+            "release" => {
+                if self.pre_release.is_empty() {
+                    return Err(IncrementError::NotAPrerelease(self.to_string()));
+                }
+                self.pre_release.clear();
+            }
+            "major" => {
+                if self.minor != 0 || self.patch != 0 || self.pre_release.is_empty() {
+                    self.major = self.major.checked_add(1).ok_or(IncrementError::Overflow)?;
+                }
+                self.minor = 0;
+                self.patch = 0;
+                self.pre_release.clear();
+            }
+            "minor" => {
+                if self.patch != 0 || self.pre_release.is_empty() {
+                    self.minor = self.minor.checked_add(1).ok_or(IncrementError::Overflow)?;
+                }
+                self.patch = 0;
+                self.pre_release.clear();
+            }
+            "patch" => {
+                if self.pre_release.is_empty() {
+                    self.patch = self.patch.checked_add(1).ok_or(IncrementError::Overflow)?;
+                }
+                self.pre_release.clear();
+            }
+            "pre" => {
+                self.apply_pre_increment(identifier.as_deref(), identifier_base)?;
+            }
+            _ => {
+                return Err(IncrementError::InvalidIncrementArgument(
+                    release.to_string(),
+                ));
+            }
+        }
+
+        Ok(self)
+    }
+
+    fn apply_pre_increment(
+        &mut self,
+        identifier: Option<&str>,
+        identifier_base: IdentifierBase,
+    ) -> Result<(), IncrementError> {
+        let base = identifier_base.base_value();
+        let identifier_base_is_false = identifier_base == IdentifierBase::False;
+        let identifier = identifier.map(|id| id.to_string());
+
+        if self.pre_release.is_empty() {
+            self.pre_release.push(Identifier::Numeric(base));
+        } else {
+            let mut incremented = false;
+            for ident in self.pre_release.iter_mut().rev() {
+                if let Identifier::Numeric(num) = ident {
+                    *num = num.checked_add(1).ok_or(IncrementError::Overflow)?;
+                    incremented = true;
+                    break;
+                }
+            }
+
+            if !incremented {
+                if identifier_base_is_false {
+                    if let Some(id) = identifier.as_deref() {
+                        if id == join_prerelease_components(&self.pre_release) {
+                            return Err(IncrementError::InvalidIncrementArgument(
+                                "identifier already exists".into(),
+                            ));
+                        }
+                    }
+                }
+                self.pre_release.push(Identifier::Numeric(base));
+            }
+        }
+
+        if let Some(id) = identifier {
+            let prerelease = if identifier_base_is_false {
+                vec![Identifier::AlphaNumeric(id.clone())]
+            } else {
+                vec![
+                    Identifier::AlphaNumeric(id.clone()),
+                    Identifier::Numeric(base),
+                ]
+            };
+
+            if let Some(first) = self.pre_release.get(0) {
+                if compare_identifier_and_str(first, &id) == Ordering::Equal {
+                    if !matches!(self.pre_release.get(1), Some(Identifier::Numeric(_))) {
+                        self.pre_release = prerelease;
+                    }
+                } else {
+                    self.pre_release = prerelease;
+                }
+            } else {
+                self.pre_release = prerelease;
+            }
+        }
+
+        Ok(())
     }
 
     /// Parse a semver string into a [Version].
@@ -708,6 +940,46 @@ fn identifier<'s>(input: &mut &'s str) -> PResult<Identifier, SemverParseError<&
     .parse_next(input)
 }
 
+fn is_valid_prerelease_identifier(identifier: &str) -> bool {
+    !identifier.is_empty()
+        && identifier.split('.').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+        })
+}
+
+fn join_prerelease_components(pre_release: &[Identifier]) -> String {
+    pre_release
+        .iter()
+        .map(|ident| ident.to_string())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn compare_identifier_and_str(existing: &Identifier, other: &str) -> Ordering {
+    match existing {
+        Identifier::Numeric(value) => {
+            if other.chars().all(|c| c.is_ascii_digit()) {
+                match other.parse::<u128>() {
+                    Ok(other_num) => (*value as u128).cmp(&other_num),
+                    Err(_) => Ordering::Less,
+                }
+            } else {
+                Ordering::Less
+            }
+        }
+        Identifier::AlphaNumeric(value) => {
+            if other.chars().all(|c| c.is_ascii_digit()) {
+                Ordering::Greater
+            } else {
+                value.as_str().cmp(other)
+            }
+        }
+    }
+}
+
 pub(crate) fn number<'s>(input: &mut &'s str) -> PResult<u64, SemverParseError<&'s str>> {
     #[allow(suspicious_double_ref_op)]
     let copied = input.clone();
@@ -739,6 +1011,105 @@ mod tests {
     use super::*;
 
     use pretty_assertions::assert_eq;
+    use serde_json::Value;
+
+    #[derive(Debug)]
+    struct IncrementCase {
+        version: String,
+        release: String,
+        expected: Option<String>,
+        identifier: Option<String>,
+        identifier_base: Option<IdentifierBase>,
+    }
+
+    fn version_without_build(version: &Version) -> String {
+        let mut output = format!("{}.{}.{}", version.major, version.minor, version.patch);
+        if !version.pre_release.is_empty() {
+            output.push('-');
+            output.push_str(&join_prerelease_components(&version.pre_release));
+        }
+        output
+    }
+
+    fn parse_identifier_base_value(value: &Value) -> Option<IdentifierBase> {
+        match value {
+            Value::Bool(false) => Some(IdentifierBase::False),
+            Value::Bool(true) => Some(IdentifierBase::Value(1)),
+            Value::Number(num) => num.as_u64().map(IdentifierBase::Value),
+            Value::String(s) => s.parse::<u64>().ok().map(IdentifierBase::Value),
+            Value::Null => None,
+            _ => None,
+        }
+    }
+
+    fn parse_increment_entry(entry: Value) -> IncrementCase {
+        let arr = entry
+            .as_array()
+            .unwrap_or_else(|| panic!("fixture entry must be an array: {entry:?}"));
+
+        let version = arr
+            .get(0)
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("missing version in fixture: {arr:?}"))
+            .to_string();
+        let release = arr
+            .get(1)
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("missing release in fixture: {arr:?}"))
+            .to_string();
+        let expected = arr.get(2).and_then(Value::as_str).map(str::to_string);
+
+        let options = arr.get(3);
+        let (identifier, identifier_base_value) = if let Some(Value::String(s)) = options {
+            (Some(s.to_string()), arr.get(4).cloned())
+        } else {
+            (
+                arr.get(4).and_then(Value::as_str).map(str::to_string),
+                arr.get(5).cloned(),
+            )
+        };
+
+        let identifier_base = identifier_base_value
+            .as_ref()
+            .and_then(parse_identifier_base_value);
+
+        IncrementCase {
+            version,
+            release,
+            expected,
+            identifier,
+            identifier_base,
+        }
+    }
+
+    fn load_increment_cases() -> Vec<IncrementCase> {
+        let raw = include_str!("../node-semver/test/fixtures/increments.js");
+        let cleaned = raw
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let start = cleaned
+            .find('[')
+            .expect("expected array start in fixture file");
+        let end = cleaned
+            .rfind(']')
+            .expect("expected array end in fixture file");
+
+        let mut jsonish = cleaned[start..=end].to_string();
+        jsonish = jsonish.replace('\'', "\"");
+        jsonish = jsonish.replace("loose:", "\"loose\":");
+        jsonish = jsonish.replace(",\n]", "\n]");
+        jsonish = jsonish.replace(",]", "]");
+
+        let fixtures: Vec<Value> =
+            serde_json::from_str(&jsonish).expect("failed to parse increment fixtures");
+        fixtures
+            .into_iter()
+            .map(parse_increment_entry)
+            .collect::<Vec<_>>()
+    }
 
     #[test]
     fn trivial_version_number() {
@@ -1057,6 +1428,103 @@ mod tests {
         for case in cases {
             asset_version_diff(case.0, case.1, case.2);
         }
+    }
+
+    #[test]
+    fn increments_match_node_semver_fixture() {
+        for case in load_increment_cases() {
+            if let Some(expected) = &case.expected {
+                let version = Version::parse(&case.version).unwrap_or_else(|e| {
+                    panic!(
+                        "expected to parse {} but failed: {}",
+                        case.version,
+                        e.to_string()
+                    )
+                });
+                let before = version.to_string();
+                let build = version.build.clone();
+                let incremented = version
+                    .inc(
+                        &case.release,
+                        case.identifier.as_deref(),
+                        case.identifier_base,
+                    )
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "expected {} {} to succeed but errored: {}",
+                            case.version, case.release, e
+                        )
+                    });
+
+                assert_eq!(
+                    version_without_build(&incremented),
+                    expected.as_str(),
+                    "incrementing {} {} {:?} {:?}",
+                    case.version,
+                    case.release,
+                    case.identifier,
+                    case.identifier_base
+                );
+                assert_eq!(
+                    incremented.build, build,
+                    "build metadata should remain unchanged after increment"
+                );
+                assert_eq!(
+                    version.to_string(),
+                    before,
+                    "original version should remain unchanged"
+                );
+            } else if let Ok(version) = Version::parse(&case.version) {
+                let before = version.to_string();
+                assert!(
+                    version
+                        .inc(
+                            &case.release,
+                            case.identifier.as_deref(),
+                            case.identifier_base
+                        )
+                        .is_err(),
+                    "expected {} {} to fail",
+                    case.version,
+                    case.release
+                );
+                assert_eq!(
+                    version.to_string(),
+                    before,
+                    "version should stay unchanged on error"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_increment_errors_match_node_semver() {
+        let version = Version::parse("1.2.3").unwrap();
+        let err = version
+            .inc("prerelease", Some(""), Some(IdentifierBase::False))
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid increment argument: identifier is empty"
+        );
+        assert_eq!(version.to_string(), "1.2.3");
+
+        let version = Version::parse("1.2.3-dev").unwrap();
+        let err = version
+            .inc("prerelease", Some("dev"), Some(IdentifierBase::False))
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid increment argument: identifier already exists"
+        );
+        assert_eq!(version.to_string(), "1.2.3-dev");
+
+        let version = Version::parse("1.2.3").unwrap();
+        let err = version
+            .inc("prerelease", Some("invalid/preid"), None)
+            .unwrap_err();
+        assert_eq!(err.to_string(), "invalid identifier: invalid/preid");
+        assert_eq!(version.to_string(), "1.2.3");
     }
 }
 
