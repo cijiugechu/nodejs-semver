@@ -2297,6 +2297,34 @@ mod satisfies_ranges_tests {
             "above patch but pre-release"
         );
     }
+
+    #[test]
+    fn npm_compatibility_cases() {
+        let cases = [
+            ("3.4.5", ">=3.3.0-beta.1 <3.4.0-beta.3", false),
+            ("1.0.0", "1.0.x", true),
+            ("1.2.3", "1.x.x", true),
+            ("1.2.3", "x.x.x", true),
+            ("1.0.1", "1.0.0 - 1.0.x", true),
+            ("2.0.0", "1.0.0 - 1.x", false),
+            ("1.2.3", "^1 || ^2", true),
+            ("2.0.0-beta.1", "^1 || ^2", false),
+        ];
+
+        for (version, range, expected) in cases {
+            let version = Version::parse(version).unwrap();
+            let range = Range::parse(range).unwrap();
+
+            assert_eq!(
+                range.satisfies(&version),
+                expected,
+                "expected satisfies({}, {}) to be {}",
+                version,
+                range,
+                expected
+            );
+        }
+    }
 }
 
 /// https://github.com/npm/node-semver/blob/master/test/fixtures/range-parse.js
@@ -2368,6 +2396,8 @@ mod tests {
         one_two_three_or_greater_than_four => ["1.2.3 || >4", "1.2.3||>=5.0.0"],
         any_version_asterisk => ["*", ">=0.0.0"],
         any_version_x => ["x", ">=0.0.0"],
+        any_version_upper_x => ["X", ">=0.0.0"],
+        greater_than_equals_x => [">=x", ">=0.0.0"],
         whitespace_1 => [">= 1.0.0", ">=1.0.0"],
         whitespace_2 => [">=  1.0.0", ">=1.0.0"],
         whitespace_3 => [">=   1.0.0", ">=1.0.0"],
