@@ -1,6 +1,96 @@
 use super::{Bound, BoundSet, Operation, Predicate, Range};
 use crate::{Identifier, Identifiers, Version, MAX_SAFE_INTEGER};
 
+const SHORT_SCAN_MAX: usize = 16;
+const BYTE_LANE_LOW_BITS: u128 = 0x0101_0101_0101_0101_0101_0101_0101_0101;
+const BYTE_LANE_HIGH_BITS: u128 = 0x8080_8080_8080_8080_8080_8080_8080_8080;
+
+#[derive(Clone, Copy)]
+struct ShortWord {
+    word: u128,
+    len: usize,
+}
+
+impl ShortWord {
+    #[inline(always)]
+    fn new(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() > SHORT_SCAN_MAX {
+            return None;
+        }
+
+        let mut padded = [0; SHORT_SCAN_MAX];
+        padded[..bytes.len()].copy_from_slice(bytes);
+        Some(Self {
+            word: u128::from_le_bytes(padded),
+            len: bytes.len(),
+        })
+    }
+
+    #[inline(always)]
+    fn contains_byte(self, needle: u8) -> bool {
+        self.matching_byte_lanes(needle) & active_byte_mask(self.len) != 0
+    }
+
+    #[inline(always)]
+    fn contains_repeated_pair(self, needle: u8) -> bool {
+        if self.len < 2 {
+            return false;
+        }
+
+        let byte_matches = self.matching_byte_lanes(needle);
+        let valid_pair_starts = active_byte_mask(self.len - 1);
+
+        (byte_matches & (byte_matches >> 8) & valid_pair_starts) != 0
+    }
+
+    #[inline(always)]
+    fn matching_byte_lanes(self, needle: u8) -> u128 {
+        matching_byte_lanes(self.word, needle)
+    }
+}
+
+#[inline(always)]
+fn contains_byte_fast(bytes: &[u8], needle: u8) -> bool {
+    if let Some(word) = ShortWord::new(bytes) {
+        return word.contains_byte(needle);
+    }
+
+    bytes.contains(&needle)
+}
+
+#[inline(always)]
+fn contains_or_fast(input: &str) -> bool {
+    let bytes = input.as_bytes();
+    if let Some(word) = ShortWord::new(bytes) {
+        return word.contains_repeated_pair(b'|');
+    }
+
+    input.contains("||")
+}
+
+#[inline(always)]
+fn active_byte_mask(len: usize) -> u128 {
+    if len >= SHORT_SCAN_MAX {
+        u128::MAX
+    } else if len == 0 {
+        0
+    } else {
+        (1u128 << (len * 8)) - 1
+    }
+}
+
+#[inline(always)]
+fn repeated_byte(byte: u8) -> u128 {
+    u128::from_le_bytes([byte; SHORT_SCAN_MAX])
+}
+
+#[inline(always)]
+fn matching_byte_lanes(word: u128, needle: u8) -> u128 {
+    // XOR turns matching bytes into zero bytes; this sets the high bit in each zero byte lane.
+    let zero_bytes = word ^ repeated_byte(needle);
+    zero_bytes.wrapping_sub(BYTE_LANE_LOW_BITS) & !zero_bytes & BYTE_LANE_HIGH_BITS
+}
+
 pub(super) fn parse(input: &str) -> Option<Range> {
     let bytes = input.as_bytes();
     let first = bytes.first().copied();
@@ -10,7 +100,8 @@ pub(super) fn parse(input: &str) -> Option<Range> {
     }
 
     if matches!(first, Some(b'>' | b'<' | b'=')) {
-        return parse_comparator_set(input).or_else(|| parse_or_if_present(input));
+        return parse_comparator_set(input, contains_byte_fast(bytes, b'+'))
+            .or_else(|| parse_or_if_present(input));
     }
 
     if let Some(range) = parse_exact_version(bytes)
@@ -24,8 +115,10 @@ pub(super) fn parse(input: &str) -> Option<Range> {
     }
 
     if matches!(first, Some(b'v' | b'V' | b'0'..=b'9')) {
-        if let Some(range) = parse_hyphen(input) {
-            return Some(range);
+        if contains_byte_fast(bytes, b'-') {
+            if let Some(range) = parse_hyphen(input, contains_byte_fast(bytes, b'+')) {
+                return Some(range);
+            }
         }
 
         return parse_partial_wildcard(input).or_else(|| parse_or_if_present(input));
@@ -35,7 +128,7 @@ pub(super) fn parse(input: &str) -> Option<Range> {
 }
 
 fn parse_or_if_present(input: &str) -> Option<Range> {
-    input.contains("||").then(|| parse_or(input)).flatten()
+    contains_or_fast(input).then(|| parse_or(input)).flatten()
 }
 
 fn parse_or(input: &str) -> Option<Range> {
@@ -54,8 +147,8 @@ fn parse_or(input: &str) -> Option<Range> {
     (!sets.is_empty()).then_some(Range(sets))
 }
 
-fn parse_hyphen(input: &str) -> Option<Range> {
-    if input.as_bytes().contains(&b'+') {
+fn parse_hyphen(input: &str, has_plus: bool) -> Option<Range> {
+    if has_plus {
         return None;
     }
 
@@ -105,8 +198,8 @@ fn hyphen_upper(partial: Partial) -> Predicate {
     }
 }
 
-fn parse_comparator_set(input: &str) -> Option<Range> {
-    if input.as_bytes().contains(&b'+') {
+fn parse_comparator_set(input: &str, has_plus: bool) -> Option<Range> {
+    if has_plus {
         return None;
     }
 
@@ -563,5 +656,43 @@ fn parse_identifiers(input: &str, start: usize) -> Option<(Identifiers, usize)> 
         }
 
         i += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_word_accepts_only_inputs_up_to_one_word() {
+        assert!(ShortWord::new(b"").is_some());
+        assert!(ShortWord::new(b"1234567890123456").is_some());
+        assert!(ShortWord::new(b"12345678901234567").is_none());
+    }
+
+    #[test]
+    fn short_byte_search_ignores_zero_padding() {
+        assert!(!contains_byte_fast(b"abc", 0));
+        assert!(contains_byte_fast(b"a\0c", 0));
+        assert!(contains_byte_fast(b">=1.2.3", b'>'));
+        assert!(!contains_byte_fast(b">=1.2.3", b'+'));
+    }
+
+    #[test]
+    fn short_or_search_requires_adjacent_pipes() {
+        assert!(contains_or_fast("12345678901234||"));
+        assert!(contains_or_fast("^1 || ^2"));
+        assert!(!contains_or_fast("123456789012345|"));
+        assert!(!contains_or_fast("^1 | ^2"));
+        assert!(!contains_or_fast("|"));
+        assert!(!contains_or_fast(""));
+    }
+
+    #[test]
+    fn scanners_fall_back_for_long_inputs() {
+        assert!(contains_byte_fast(b"12345678901234567+meta", b'+'));
+        assert!(!contains_byte_fast(b"12345678901234567-meta", b'+'));
+        assert!(contains_or_fast("12345678901234567||next"));
+        assert!(!contains_or_fast("12345678901234567|next"));
     }
 }
