@@ -1,5 +1,5 @@
 use super::{Bound, BoundSet, Operation, Predicate, Range};
-use crate::{Identifier, Version, MAX_SAFE_INTEGER};
+use crate::{Identifier, Identifiers, Version, MAX_SAFE_INTEGER};
 
 pub(super) fn parse(input: &str) -> Option<Range> {
     let bytes = input.as_bytes();
@@ -88,37 +88,19 @@ fn hyphen_upper(partial: Partial) -> Predicate {
             minor: None,
             patch: None,
             ..
-        } => Predicate::Excluding(Version {
-            major: 0,
-            minor: 0,
-            patch: 0,
-            pre_release: vec![Identifier::Numeric(0)],
-            build: Vec::new(),
-        }),
+        } => Predicate::Excluding(Version::from((0, 0, 0, 0))),
         Partial {
             major: Some(major),
             minor: None,
             patch: None,
             ..
-        } => Predicate::Excluding(Version {
-            major: major + 1,
-            minor: 0,
-            patch: 0,
-            pre_release: vec![Identifier::Numeric(0)],
-            build: Vec::new(),
-        }),
+        } => Predicate::Excluding(Version::from((major + 1, 0, 0, 0))),
         Partial {
             major: Some(major),
             minor: Some(minor),
             patch: None,
             ..
-        } => Predicate::Excluding(Version {
-            major,
-            minor: minor + 1,
-            patch: 0,
-            pre_release: vec![Identifier::Numeric(0)],
-            build: Vec::new(),
-        }),
+        } => Predicate::Excluding(Version::from((major, minor + 1, 0, 0))),
         partial => Predicate::Including(partial_to_version(partial)),
     }
 }
@@ -257,13 +239,13 @@ fn primitive_range(operation: Operation, partial: Partial) -> Option<BoundSet> {
                 patch: Some(patch),
                 pre_release,
             },
-        ) => BoundSet::exact(Version {
+        ) => BoundSet::exact(Version::new_with_identifiers(
             major,
             minor,
             patch,
             pre_release,
-            build: Vec::new(),
-        }),
+            Identifiers::Empty,
+        )),
         (
             Exact,
             Partial {
@@ -273,13 +255,12 @@ fn primitive_range(operation: Operation, partial: Partial) -> Option<BoundSet> {
             },
         ) => BoundSet::new(
             Bound::Lower(Predicate::Including(Version::from((major, minor, 0)))),
-            Bound::Upper(Predicate::Excluding(Version {
+            Bound::Upper(Predicate::Excluding(Version::from((
                 major,
-                minor: minor + 1,
-                patch: 0,
-                pre_release: vec![Identifier::Numeric(0)],
-                build: Vec::new(),
-            })),
+                minor + 1,
+                0,
+                0,
+            )))),
         ),
         (
             Exact,
@@ -288,26 +269,20 @@ fn primitive_range(operation: Operation, partial: Partial) -> Option<BoundSet> {
             },
         ) => BoundSet::new(
             Bound::Lower(Predicate::Including(Version::from((major, 0, 0)))),
-            Bound::Upper(Predicate::Excluding(Version {
-                major: major + 1,
-                minor: 0,
-                patch: 0,
-                pre_release: vec![Identifier::Numeric(0)],
-                build: Vec::new(),
-            })),
+            Bound::Upper(Predicate::Excluding(Version::from((major + 1, 0, 0, 0)))),
         ),
         _ => None,
     }
 }
 
 fn partial_to_version(partial: Partial) -> Version {
-    Version {
-        major: partial.major.unwrap_or(0),
-        minor: partial.minor.unwrap_or(0),
-        patch: partial.patch.unwrap_or(0),
-        pre_release: partial.pre_release,
-        build: Vec::new(),
-    }
+    Version::new_with_identifiers(
+        partial.major.unwrap_or(0),
+        partial.minor.unwrap_or(0),
+        partial.patch.unwrap_or(0),
+        partial.pre_release,
+        Identifiers::Empty,
+    )
 }
 
 fn parse_caret(input: &str) -> Option<Range> {
@@ -358,13 +333,12 @@ fn partial_wildcard_range(partial: Partial) -> Option<BoundSet> {
             ..
         } => BoundSet::new(
             Bound::Lower(Predicate::Including(Version::from((major, minor, 0)))),
-            Bound::Upper(Predicate::Excluding(Version {
+            Bound::Upper(Predicate::Excluding(Version::from((
                 major,
-                minor: minor + 1,
-                patch: 0,
-                pre_release: vec![Identifier::Numeric(0)],
-                build: Vec::new(),
-            })),
+                minor + 1,
+                0,
+                0,
+            )))),
         ),
         _ => None,
     }
@@ -411,13 +385,13 @@ fn caret_range(partial: Partial) -> Option<BoundSet> {
             patch: Some(patch),
             pre_release,
         } => BoundSet::new(
-            Bound::Lower(Predicate::Including(Version {
+            Bound::Lower(Predicate::Including(Version::new_with_identifiers(
                 major,
                 minor,
                 patch,
                 pre_release,
-                build: Vec::new(),
-            })),
+                Identifiers::Empty,
+            ))),
             Bound::Upper(Predicate::Excluding(match (major, minor, patch) {
                 (0, 0, n) => Version::from((0, 0, n + 1, 0)),
                 (0, n, _) => Version::from((0, n + 1, 0, 0)),
@@ -447,13 +421,7 @@ fn parse_exact_version(bytes: &[u8]) -> Option<Version> {
         return None;
     }
 
-    Some(Version {
-        major,
-        minor,
-        patch,
-        pre_release: Vec::new(),
-        build: Vec::new(),
-    })
+    Some(Version::from((major, minor, patch)))
 }
 
 fn parse_number(bytes: &[u8], start: usize) -> Option<(u64, usize)> {
@@ -493,7 +461,7 @@ struct Partial {
     major: Option<u64>,
     minor: Option<u64>,
     patch: Option<u64>,
-    pre_release: Vec<Identifier>,
+    pre_release: Identifiers,
 }
 
 fn parse_partial(input: &str, start: usize) -> Option<(Partial, usize)> {
@@ -516,7 +484,7 @@ fn parse_partial(input: &str, start: usize) -> Option<(Partial, usize)> {
 
     let mut minor = None;
     let mut patch = None;
-    let mut pre_release = Vec::new();
+    let mut pre_release = Identifiers::Empty;
 
     if bytes.get(i) == Some(&b'.') {
         let (parsed_minor, next) = parse_component(bytes, i + 1)?;
@@ -562,10 +530,10 @@ fn parse_component(bytes: &[u8], start: usize) -> Option<(Option<u64>, usize)> {
     }
 }
 
-fn parse_identifiers(input: &str, start: usize) -> Option<(Vec<Identifier>, usize)> {
+fn parse_identifiers(input: &str, start: usize) -> Option<(Identifiers, usize)> {
     let bytes = input.as_bytes();
     let mut i = start;
-    let mut identifiers = Vec::new();
+    let mut identifiers = Identifiers::Empty;
 
     loop {
         let ident_start = i;

@@ -363,8 +363,74 @@ pub struct Version {
     pub major: u64,
     pub minor: u64,
     pub patch: u64,
-    pub build: Vec<Identifier>,
-    pub pre_release: Vec<Identifier>,
+    meta: Option<Box<VersionMeta>>,
+}
+
+#[derive(Clone, Debug)]
+struct VersionMeta {
+    build: Identifiers,
+    pre_release: Identifiers,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum Identifiers {
+    Empty,
+    One(Identifier),
+    Two([Identifier; 2]),
+    Many(Vec<Identifier>),
+}
+
+impl Identifiers {
+    pub(crate) fn from_vec(mut identifiers: Vec<Identifier>) -> Self {
+        match identifiers.len() {
+            0 => Self::Empty,
+            1 => Self::One(identifiers.pop().unwrap()),
+            2 => {
+                let second = identifiers.pop().unwrap();
+                let first = identifiers.pop().unwrap();
+                Self::Two([first, second])
+            }
+            _ => Self::Many(identifiers),
+        }
+    }
+
+    fn as_slice(&self) -> &[Identifier] {
+        match self {
+            Self::Empty => &[],
+            Self::One(identifier) => std::slice::from_ref(identifier),
+            Self::Two(identifiers) => identifiers.as_slice(),
+            Self::Many(identifiers) => identifiers.as_slice(),
+        }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [Identifier] {
+        match self {
+            Self::Empty => &mut [],
+            Self::One(identifier) => std::slice::from_mut(identifier),
+            Self::Two(identifiers) => identifiers.as_mut_slice(),
+            Self::Many(identifiers) => identifiers.as_mut_slice(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    fn clear(&mut self) {
+        *self = Self::Empty;
+    }
+
+    pub(crate) fn push(&mut self, identifier: Identifier) {
+        match std::mem::replace(self, Self::Empty) {
+            Self::Empty => *self = Self::One(identifier),
+            Self::One(existing) => *self = Self::Two([existing, identifier]),
+            Self::Two([first, second]) => *self = Self::Many(vec![first, second, identifier]),
+            Self::Many(mut identifiers) => {
+                identifiers.push(identifier);
+                *self = Self::Many(identifiers);
+            }
+        }
+    }
 }
 
 #[cfg(feature = "serde")]
@@ -383,6 +449,119 @@ impl<'de> Deserialize<'de> for Version {
 }
 
 impl Version {
+    pub fn new(
+        major: u64,
+        minor: u64,
+        patch: u64,
+        pre_release: Vec<Identifier>,
+        build: Vec<Identifier>,
+    ) -> Self {
+        let meta = if pre_release.is_empty() && build.is_empty() {
+            return Self::new_empty(major, minor, patch);
+        } else {
+            Some(Box::new(VersionMeta {
+                build: Identifiers::from_vec(build),
+                pre_release: Identifiers::from_vec(pre_release),
+            }))
+        };
+
+        Self {
+            major,
+            minor,
+            patch,
+            meta,
+        }
+    }
+
+    pub(crate) fn new_empty(major: u64, minor: u64, patch: u64) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+            meta: None,
+        }
+    }
+
+    fn new_with_pre_release_identifier(
+        major: u64,
+        minor: u64,
+        patch: u64,
+        pre_release: Identifier,
+    ) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+            meta: Some(Box::new(VersionMeta {
+                build: Identifiers::Empty,
+                pre_release: Identifiers::One(pre_release),
+            })),
+        }
+    }
+
+    pub(crate) fn new_with_identifiers(
+        major: u64,
+        minor: u64,
+        patch: u64,
+        pre_release: Identifiers,
+        build: Identifiers,
+    ) -> Self {
+        if pre_release.is_empty() && build.is_empty() {
+            return Self::new_empty(major, minor, patch);
+        }
+
+        Self {
+            major,
+            minor,
+            patch,
+            meta: Some(Box::new(VersionMeta { build, pre_release })),
+        }
+    }
+
+    pub fn build(&self) -> &[Identifier] {
+        self.meta.as_ref().map_or(&[], |meta| meta.build.as_slice())
+    }
+
+    pub fn pre_release(&self) -> &[Identifier] {
+        self.meta
+            .as_ref()
+            .map_or(&[], |meta| meta.pre_release.as_slice())
+    }
+
+    fn metadata_mut(&mut self) -> &mut VersionMeta {
+        self.meta.get_or_insert_with(|| {
+            Box::new(VersionMeta {
+                build: Identifiers::Empty,
+                pre_release: Identifiers::Empty,
+            })
+        })
+    }
+
+    fn clear_pre_release(&mut self) {
+        if let Some(meta) = &mut self.meta {
+            meta.pre_release.clear();
+            if meta.build.is_empty() {
+                self.meta = None;
+            }
+        }
+    }
+
+    pub(crate) fn push_pre_release(&mut self, identifier: Identifier) {
+        self.metadata_mut().pre_release.push(identifier);
+    }
+
+    fn set_pre_release(&mut self, pre_release: Vec<Identifier>) {
+        if pre_release.is_empty() {
+            self.clear_pre_release();
+        } else {
+            self.metadata_mut().pre_release = Identifiers::from_vec(pre_release);
+        }
+    }
+
+    fn pre_release_mut(&mut self) -> &mut Identifiers {
+        &mut self.metadata_mut().pre_release
+    }
+
     /// True if this [Version] satisfies the given [Range].
     pub fn satisfies(&self, range: &Range) -> bool {
         range.satisfies(self)
@@ -397,7 +576,7 @@ impl Version {
 
     /// True is this [Version] has a prerelease component.
     pub fn is_prerelease(&self) -> bool {
-        !self.pre_release.is_empty()
+        !self.pre_release().is_empty()
     }
 
     /// Increment this [Version] according to the given release type, returning a new [Version].
@@ -445,55 +624,55 @@ impl Version {
 
         match release {
             "premajor" => {
-                self.pre_release.clear();
+                self.clear_pre_release();
                 self.patch = 0;
                 self.minor = 0;
                 self.major = self.major.checked_add(1).ok_or(IncrementError::Overflow)?;
                 self.inc_mut("pre", identifier.as_deref(), Some(identifier_base))?;
             }
             "preminor" => {
-                self.pre_release.clear();
+                self.clear_pre_release();
                 self.patch = 0;
                 self.minor = self.minor.checked_add(1).ok_or(IncrementError::Overflow)?;
                 self.inc_mut("pre", identifier.as_deref(), Some(identifier_base))?;
             }
             "prepatch" => {
-                self.pre_release.clear();
+                self.clear_pre_release();
                 self.inc_mut("patch", identifier.as_deref(), Some(identifier_base))?;
                 self.inc_mut("pre", identifier.as_deref(), Some(identifier_base))?;
             }
             "prerelease" => {
-                if self.pre_release.is_empty() {
+                if self.pre_release().is_empty() {
                     self.inc_mut("patch", identifier.as_deref(), Some(identifier_base))?;
                 }
                 self.inc_mut("pre", identifier.as_deref(), Some(identifier_base))?;
             }
             "release" => {
-                if self.pre_release.is_empty() {
+                if self.pre_release().is_empty() {
                     return Err(IncrementError::NotAPrerelease(self.to_string()));
                 }
-                self.pre_release.clear();
+                self.clear_pre_release();
             }
             "major" => {
-                if self.minor != 0 || self.patch != 0 || self.pre_release.is_empty() {
+                if self.minor != 0 || self.patch != 0 || self.pre_release().is_empty() {
                     self.major = self.major.checked_add(1).ok_or(IncrementError::Overflow)?;
                 }
                 self.minor = 0;
                 self.patch = 0;
-                self.pre_release.clear();
+                self.clear_pre_release();
             }
             "minor" => {
-                if self.patch != 0 || self.pre_release.is_empty() {
+                if self.patch != 0 || self.pre_release().is_empty() {
                     self.minor = self.minor.checked_add(1).ok_or(IncrementError::Overflow)?;
                 }
                 self.patch = 0;
-                self.pre_release.clear();
+                self.clear_pre_release();
             }
             "patch" => {
-                if self.pre_release.is_empty() {
+                if self.pre_release().is_empty() {
                     self.patch = self.patch.checked_add(1).ok_or(IncrementError::Overflow)?;
                 }
-                self.pre_release.clear();
+                self.clear_pre_release();
             }
             "pre" => {
                 self.apply_pre_increment(identifier.as_deref(), identifier_base)?;
@@ -517,11 +696,11 @@ impl Version {
         let identifier_base_is_false = identifier_base == IdentifierBase::False;
         let identifier = identifier.map(|id| id.to_string());
 
-        if self.pre_release.is_empty() {
-            self.pre_release.push(Identifier::Numeric(base));
+        if self.pre_release().is_empty() {
+            self.push_pre_release(Identifier::Numeric(base));
         } else {
             let mut incremented = false;
-            for ident in self.pre_release.iter_mut().rev() {
+            for ident in self.pre_release_mut().as_mut_slice().iter_mut().rev() {
                 if let Identifier::Numeric(num) = ident {
                     *num = num.checked_add(1).ok_or(IncrementError::Overflow)?;
                     incremented = true;
@@ -532,14 +711,14 @@ impl Version {
             if !incremented {
                 if identifier_base_is_false {
                     if let Some(id) = identifier.as_deref() {
-                        if id == join_prerelease_components(&self.pre_release) {
+                        if id == join_prerelease_components(self.pre_release()) {
                             return Err(IncrementError::InvalidIncrementArgument(
                                 "identifier already exists".into(),
                             ));
                         }
                     }
                 }
-                self.pre_release.push(Identifier::Numeric(base));
+                self.push_pre_release(Identifier::Numeric(base));
             }
         }
 
@@ -553,16 +732,16 @@ impl Version {
                 ]
             };
 
-            if let Some(first) = self.pre_release.first() {
+            if let Some(first) = self.pre_release().first() {
                 if compare_identifier_and_str(first, &id) == Ordering::Equal {
-                    if !matches!(self.pre_release.get(1), Some(Identifier::Numeric(_))) {
-                        self.pre_release = prerelease;
+                    if !matches!(self.pre_release().get(1), Some(Identifier::Numeric(_))) {
+                        self.set_pre_release(prerelease);
                     }
                 } else {
-                    self.pre_release = prerelease;
+                    self.set_pre_release(prerelease);
                 }
             } else {
-                self.pre_release = prerelease;
+                self.set_pre_release(prerelease);
             }
         }
 
@@ -692,7 +871,7 @@ impl PartialEq for Version {
         self.major == other.major
             && self.minor == other.minor
             && self.patch == other.patch
-            && self.pre_release == other.pre_release
+            && self.pre_release() == other.pre_release()
     }
 }
 
@@ -703,7 +882,7 @@ impl std::hash::Hash for Version {
         self.major.hash(state);
         self.minor.hash(state);
         self.patch.hash(state);
-        self.pre_release.hash(state);
+        self.pre_release().hash(state);
     }
 }
 
@@ -711,7 +890,7 @@ impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}.{}", self.major, self.minor, self.patch)?;
 
-        for (i, ident) in self.pre_release.iter().enumerate() {
+        for (i, ident) in self.pre_release().iter().enumerate() {
             if i == 0 {
                 write!(f, "-")?;
             } else {
@@ -720,7 +899,7 @@ impl fmt::Display for Version {
             write!(f, "{}", ident)?;
         }
 
-        for (i, ident) in self.build.iter().enumerate() {
+        for (i, ident) in self.build().iter().enumerate() {
             if i == 0 {
                 write!(f, "+")?;
             } else {
@@ -738,25 +917,18 @@ macro_rules! impl_from_unsigned_for_version {
         $(
             impl ::std::convert::From<($t, $t, $t)> for Version {
                 fn from((major, minor, patch): ($t, $t, $t)) -> Self {
-                    Version {
-                        major: major as u64,
-                        minor: minor as u64,
-                        patch: patch as u64,
-                        build: Vec::new(),
-                        pre_release: Vec::new(),
-                    }
+                    Version::new_empty(major as u64, minor as u64, patch as u64)
                 }
             }
 
             impl ::std::convert::From<($t, $t, $t, $t)> for Version {
                 fn from((major, minor, patch, pre_release): ($t, $t, $t, $t)) -> Self {
-                    Version {
-                        major: major as u64,
-                        minor: minor as u64,
-                        patch: patch as u64,
-                        build: Vec::new(),
-                        pre_release: vec![Identifier::Numeric(pre_release as u64)],
-                    }
+                    Version::new_with_pre_release_identifier(
+                        major as u64,
+                        minor as u64,
+                        patch as u64,
+                        Identifier::Numeric(pre_release as u64),
+                    )
                 }
             }
         )+
@@ -772,13 +944,7 @@ macro_rules! impl_from_signed_for_version {
                     debug_assert!(minor >= 0, "Version minor must be non-negative, got {}", minor);
                     debug_assert!(patch >= 0, "Version patch must be non-negative, got {}", patch);
 
-                    Version {
-                        major: major as u64,
-                        minor: minor as u64,
-                        patch: patch as u64,
-                        build: Vec::new(),
-                        pre_release: Vec::new(),
-                    }
+                    Version::new_empty(major as u64, minor as u64, patch as u64)
                 }
             }
 
@@ -789,13 +955,12 @@ macro_rules! impl_from_signed_for_version {
                     debug_assert!(patch >= 0, "Version patch must be non-negative, got {}", patch);
                     debug_assert!(pre_release >= 0, "Version pre-release must be non-negative, got {}", pre_release);
 
-                    Version {
-                        major: major as u64,
-                        minor: minor as u64,
-                        patch: patch as u64,
-                        build: Vec::new(),
-                        pre_release: vec![Identifier::Numeric(pre_release as u64)],
-                    }
+                    Version::new_with_pre_release_identifier(
+                        major as u64,
+                        minor as u64,
+                        patch as u64,
+                        Identifier::Numeric(pre_release as u64),
+                    )
                 }
             }
         )+
@@ -838,7 +1003,7 @@ impl cmp::Ord for Version {
             order_result => return order_result,
         }
 
-        match (self.pre_release.len(), other.pre_release.len()) {
+        match (self.pre_release().len(), other.pre_release().len()) {
             //if no pre_release string, they're equal
             (0, 0) => Ordering::Equal,
             //if other has a pre-release string, but this doesn't, this one is greater
@@ -846,7 +1011,7 @@ impl cmp::Ord for Version {
             //if this one has a pre-release string, but other doesn't this one is less than
             (_, 0) => Ordering::Less,
             // if both have pre_release strings, compare the strings and return the result
-            (_, _) => self.pre_release.cmp(&other.pre_release),
+            (_, _) => self.pre_release().cmp(other.pre_release()),
         }
     }
 }
@@ -879,15 +1044,9 @@ fn version<'s>(input: &mut &'s str) -> ModalResult<Version, SemverParseError<&'s
         version_core,
         extras,
     )
-        .map(
-            |(_, _, (major, minor, patch), (pre_release, build))| Version {
-                major,
-                minor,
-                patch,
-                pre_release,
-                build,
-            },
-        )
+        .map(|(_, _, (major, minor, patch), (pre_release, build))| {
+            Version::new(major, minor, patch, pre_release, build)
+        })
         .context("version")
         .parse_next(input)
 }
@@ -1514,9 +1673,9 @@ mod tests {
 
     fn version_without_build(version: &Version) -> String {
         let mut output = format!("{}.{}.{}", version.major, version.minor, version.patch);
-        if !version.pre_release.is_empty() {
+        if !version.pre_release().is_empty() {
             output.push('-');
-            output.push_str(&join_prerelease_components(&version.pre_release));
+            output.push_str(&join_prerelease_components(version.pre_release()));
         }
         output
     }
@@ -1540,13 +1699,7 @@ mod tests {
 
         assert_eq!(
             v,
-            Version {
-                major: 1,
-                minor: 2,
-                patch: 34,
-                build: Vec::with_capacity(2),
-                pre_release: Vec::with_capacity(2),
-            }
+            Version::new(1, 2, 34, Vec::with_capacity(2), Vec::with_capacity(2))
         );
     }
 
@@ -1556,13 +1709,13 @@ mod tests {
 
         assert_eq!(
             v,
-            Version {
-                major: 1,
-                minor: 2,
-                patch: 34,
-                build: vec![Numeric(123), Numeric(456)],
-                pre_release: Vec::with_capacity(2),
-            }
+            Version::new(
+                1,
+                2,
+                34,
+                Vec::with_capacity(2),
+                vec![Numeric(123), Numeric(456)]
+            )
         );
     }
 
@@ -1572,13 +1725,13 @@ mod tests {
 
         assert_eq!(
             v,
-            Version {
-                major: 1,
-                minor: 2,
-                patch: 34,
-                pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
-                build: Vec::with_capacity(2),
-            }
+            Version::new(
+                1,
+                2,
+                34,
+                vec![AlphaNumeric("abc".into()), Numeric(123)],
+                Vec::with_capacity(2),
+            )
         );
     }
 
@@ -1588,13 +1741,13 @@ mod tests {
 
         assert_eq!(
             v,
-            Version {
-                major: 1,
-                minor: 2,
-                patch: 34,
-                pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
-                build: vec![Numeric(1),]
-            }
+            Version::new(
+                1,
+                2,
+                34,
+                vec![AlphaNumeric("abc".into()), Numeric(123)],
+                vec![Numeric(1)],
+            )
         );
     }
 
@@ -1604,74 +1757,74 @@ mod tests {
 
         assert_eq!(
             v,
-            Version {
-                major: 1,
-                minor: 0,
-                patch: 0,
-                pre_release: vec![
+            Version::new(
+                1,
+                0,
+                0,
+                vec![
                     Identifier::AlphaNumeric("rc".into()),
                     Identifier::AlphaNumeric("2-migration".into())
                 ],
-                build: vec![],
-            }
+                vec![],
+            )
         );
     }
 
     #[test]
     fn comparison_with_different_major_version() {
-        let lesser_version = Version {
-            major: 1,
-            minor: 2,
-            patch: 34,
-            pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
-            build: vec![],
-        };
-        let greater_version = Version {
-            major: 2,
-            minor: 2,
-            patch: 34,
-            pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
-            build: vec![],
-        };
+        let lesser_version = Version::new(
+            1,
+            2,
+            34,
+            vec![AlphaNumeric("abc".into()), Numeric(123)],
+            vec![],
+        );
+        let greater_version = Version::new(
+            2,
+            2,
+            34,
+            vec![AlphaNumeric("abc".into()), Numeric(123)],
+            vec![],
+        );
         assert_eq!(lesser_version.cmp(&greater_version), Ordering::Less);
         assert_eq!(greater_version.cmp(&lesser_version), Ordering::Greater);
     }
     #[test]
     fn comparison_with_different_minor_version() {
-        let lesser_version = Version {
-            major: 1,
-            minor: 2,
-            patch: 34,
-            pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
-            build: vec![],
-        };
-        let greater_version = Version {
-            major: 1,
-            minor: 3,
-            patch: 34,
-            pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
-            build: vec![],
-        };
+        let lesser_version = Version::new(
+            1,
+            2,
+            34,
+            vec![AlphaNumeric("abc".into()), Numeric(123)],
+            vec![],
+        );
+        let greater_version = Version::new(
+            1,
+            3,
+            34,
+            vec![AlphaNumeric("abc".into()), Numeric(123)],
+            vec![],
+        );
         assert_eq!(lesser_version.cmp(&greater_version), Ordering::Less);
         assert_eq!(greater_version.cmp(&lesser_version), Ordering::Greater);
     }
 
     #[test]
     fn comparison_with_different_patch_version() {
-        let lesser_version = Version {
-            major: 1,
-            minor: 2,
-            patch: 34,
-            pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
-            build: vec![],
-        };
-        let greater_version = Version {
-            major: 1,
-            minor: 2,
-            patch: 56,
-            pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
-            build: vec![],
-        };
+        let lesser_version = Version::new(
+            1,
+            2,
+            34,
+            vec![AlphaNumeric("abc".into()), Numeric(123)],
+            vec![],
+        );
+        let greater_version = Version::new(
+            1,
+            2,
+            56,
+            vec![AlphaNumeric("abc".into()), Numeric(123)],
+            vec![],
+        );
         assert_eq!(lesser_version.cmp(&greater_version), Ordering::Less);
         assert_eq!(greater_version.cmp(&lesser_version), Ordering::Greater);
     }
@@ -1681,68 +1834,44 @@ mod tests {
     //ie checks that 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta < 1.0.0-beta.2 < 1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0.
     //for simplicity just checks them in order. Assumes that the transitive property holds. So if a < b & b < c then a < c.
     fn comparison_with_different_pre_release_version() {
-        let v1_alpha = Version {
-            major: 1,
-            minor: 0,
-            patch: 0,
-            pre_release: vec![AlphaNumeric("alpha".into())],
-            build: vec![],
-        };
-        let v1_alpha1 = Version {
-            major: 1,
-            minor: 0,
-            patch: 0,
-            pre_release: vec![AlphaNumeric("alpha".into()), Numeric(1)],
-            build: vec![],
-        };
+        let v1_alpha = Version::new(1, 0, 0, vec![AlphaNumeric("alpha".into())], vec![]);
+        let v1_alpha1 = Version::new(
+            1,
+            0,
+            0,
+            vec![AlphaNumeric("alpha".into()), Numeric(1)],
+            vec![],
+        );
         assert_eq!(v1_alpha.cmp(&v1_alpha1), Ordering::Less);
-        let v1_alpha_beta = Version {
-            major: 1,
-            minor: 0,
-            patch: 0,
-            pre_release: vec![AlphaNumeric("alpha".into()), AlphaNumeric("beta".into())],
-            build: vec![],
-        };
+        let v1_alpha_beta = Version::new(
+            1,
+            0,
+            0,
+            vec![AlphaNumeric("alpha".into()), AlphaNumeric("beta".into())],
+            vec![],
+        );
         assert_eq!(v1_alpha1.cmp(&v1_alpha_beta), Ordering::Less);
-        let v1_beta = Version {
-            major: 1,
-            minor: 0,
-            patch: 0,
-            pre_release: vec![AlphaNumeric("beta".into())],
-            build: vec![],
-        };
+        let v1_beta = Version::new(1, 0, 0, vec![AlphaNumeric("beta".into())], vec![]);
         assert_eq!(v1_alpha_beta.cmp(&v1_beta), Ordering::Less);
-        let v1_beta2 = Version {
-            major: 1,
-            minor: 0,
-            patch: 0,
-            pre_release: vec![AlphaNumeric("beta".into()), Numeric(2)],
-            build: vec![],
-        };
+        let v1_beta2 = Version::new(
+            1,
+            0,
+            0,
+            vec![AlphaNumeric("beta".into()), Numeric(2)],
+            vec![],
+        );
         assert_eq!(v1_beta.cmp(&v1_beta2), Ordering::Less);
-        let v1_beta11 = Version {
-            major: 1,
-            minor: 0,
-            patch: 0,
-            pre_release: vec![AlphaNumeric("beta".into()), Numeric(11)],
-            build: vec![],
-        };
+        let v1_beta11 = Version::new(
+            1,
+            0,
+            0,
+            vec![AlphaNumeric("beta".into()), Numeric(11)],
+            vec![],
+        );
         assert_eq!(v1_beta2.cmp(&v1_beta11), Ordering::Less);
-        let v1_rc1 = Version {
-            major: 1,
-            minor: 0,
-            patch: 0,
-            pre_release: vec![AlphaNumeric("rc".into()), Numeric(1)],
-            build: vec![],
-        };
+        let v1_rc1 = Version::new(1, 0, 0, vec![AlphaNumeric("rc".into()), Numeric(1)], vec![]);
         assert_eq!(v1_beta11.cmp(&v1_rc1), Ordering::Less);
-        let v1 = Version {
-            major: 1,
-            minor: 0,
-            patch: 0,
-            pre_release: vec![],
-            build: vec![],
-        };
+        let v1 = Version::new(1, 0, 0, vec![], vec![]);
         assert_eq!(v1_rc1.cmp(&v1), Ordering::Less);
     }
 
@@ -1773,32 +1902,14 @@ mod tests {
     fn version_prefixed_with_v() {
         // TODO: This is part of strict parsing for nodejs-semver!
         let v = Version::parse("v1.2.3").unwrap();
-        assert_eq!(
-            v,
-            Version {
-                major: 1,
-                minor: 2,
-                patch: 3,
-                pre_release: vec![],
-                build: vec![],
-            }
-        );
+        assert_eq!(v, Version::new(1, 2, 3, vec![], vec![]));
     }
 
     #[test]
     fn version_prefixed_with_v_space() {
         // TODO: Loose parsing supports this, so
         let v = Version::parse("v 1.2.3").unwrap();
-        assert_eq!(
-            v,
-            Version {
-                major: 1,
-                minor: 2,
-                patch: 3,
-                pre_release: vec![],
-                build: vec![],
-            }
-        );
+        assert_eq!(v, Version::new(1, 2, 3, vec![], vec![]));
     }
 
     fn asset_version_diff(left: &str, right: &str, expected: &str) {
@@ -1865,7 +1976,7 @@ mod tests {
                     )
                 });
                 let before = version.to_string();
-                let build = version.build.clone();
+                let build = version.build().to_vec();
                 let incremented = version
                     .inc(
                         &case.release,
@@ -1889,7 +2000,8 @@ mod tests {
                     case.identifier_base
                 );
                 assert_eq!(
-                    incremented.build, build,
+                    incremented.build(),
+                    build.as_slice(),
                     "build metadata should remain unchanged after increment"
                 );
                 assert_eq!(
@@ -1959,13 +2071,13 @@ mod serde_tests {
 
     #[test]
     fn version_serde() {
-        let v = Version {
-            major: 1,
-            minor: 2,
-            patch: 3,
-            pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
-            build: vec![AlphaNumeric("build".into())],
-        };
+        let v = Version::new(
+            1,
+            2,
+            3,
+            vec![AlphaNumeric("abc".into()), Numeric(123)],
+            vec![AlphaNumeric("build".into())],
+        );
 
         let serialized = serde_json::to_string(&v).unwrap();
         let deserialized: Version = serde_json::from_str(&serialized).unwrap();

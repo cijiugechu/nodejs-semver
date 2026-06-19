@@ -703,7 +703,7 @@ impl Range {
                     Predicate::Excluding(v) => {
                         let mut v = v.clone();
                         if v.is_prerelease() {
-                            v.pre_release.push(Identifier::Numeric(0))
+                            v.push_pre_release(Identifier::Numeric(0))
                         } else {
                             v.patch += 1;
                         }
@@ -715,7 +715,7 @@ impl Range {
                             return Some(zero);
                         }
 
-                        zero.pre_release.push(Identifier::Numeric(0));
+                        zero.push_pre_release(Identifier::Numeric(0));
                         if self.satisfies(&zero) {
                             return Some(zero);
                         }
@@ -1037,13 +1037,13 @@ fn primitive<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverPar
                     build,
                     ..
                 },
-            ) => BoundSet::at_most(Predicate::Excluding(Version {
-                major: major.unwrap_or(0),
-                minor: minor.unwrap_or(0),
-                patch: patch.unwrap_or(0),
-                build,
+            ) => BoundSet::at_most(Predicate::Excluding(Version::new(
+                major.unwrap_or(0),
+                minor.unwrap_or(0),
+                patch.unwrap_or(0),
                 pre_release,
-            })),
+                build,
+            ))),
             (
                 LessThanEquals,
                 Partial {
@@ -1076,13 +1076,7 @@ fn primitive<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverPar
                     pre_release,
                     ..
                 },
-            ) => BoundSet::exact(Version {
-                major,
-                minor,
-                patch,
-                pre_release,
-                build: vec![],
-            }),
+            ) => BoundSet::exact(Version::new(major, minor, patch, pre_release, vec![])),
             (
                 Exact,
                 Partial {
@@ -1092,13 +1086,7 @@ fn primitive<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverPar
                 },
             ) => BoundSet::new(
                 Bound::Lower(Predicate::Including((major, minor, 0).into())),
-                Bound::Upper(Predicate::Excluding(Version {
-                    major,
-                    minor: minor + 1,
-                    patch: 0,
-                    pre_release: vec![Identifier::Numeric(0)],
-                    build: vec![],
-                })),
+                Bound::Upper(Predicate::Excluding((major, minor + 1, 0, 0).into())),
             ),
             (
                 Exact,
@@ -1107,13 +1095,7 @@ fn primitive<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverPar
                 },
             ) => BoundSet::new(
                 Bound::Lower(Predicate::Including((major, 0, 0).into())),
-                Bound::Upper(Predicate::Excluding(Version {
-                    major: major + 1,
-                    minor: 0,
-                    patch: 0,
-                    pre_release: vec![Identifier::Numeric(0)],
-                    build: vec![],
-                })),
+                Bound::Upper(Predicate::Excluding((major + 1, 0, 0, 0).into())),
             ),
             _ => None,
         },
@@ -1143,13 +1125,7 @@ fn partial<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParse
             ..
         } => BoundSet::new(
             Bound::Lower(Predicate::Including((major, 0, 0).into())),
-            Bound::Upper(Predicate::Excluding(Version {
-                major: major + 1,
-                minor: 0,
-                patch: 0,
-                pre_release: vec![Identifier::Numeric(0)],
-                build: vec![],
-            })),
+            Bound::Upper(Predicate::Excluding((major + 1, 0, 0, 0).into())),
         ),
         Partial {
             major: Some(major),
@@ -1158,13 +1134,7 @@ fn partial<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParse
             ..
         } => BoundSet::new(
             Bound::Lower(Predicate::Including((major, minor, 0).into())),
-            Bound::Upper(Predicate::Excluding(Version {
-                major,
-                minor: minor + 1,
-                patch: 0,
-                pre_release: vec![Identifier::Numeric(0)],
-                build: vec![],
-            })),
+            Bound::Upper(Predicate::Excluding((major, minor + 1, 0, 0).into())),
         ),
         partial => BoundSet::exact(partial.into()),
     })
@@ -1183,13 +1153,13 @@ struct Partial {
 
 impl From<Partial> for Version {
     fn from(partial: Partial) -> Self {
-        Version {
-            major: partial.major.unwrap_or(0),
-            minor: partial.minor.unwrap_or(0),
-            patch: partial.patch.unwrap_or(0),
-            pre_release: partial.pre_release,
-            build: partial.build,
-        }
+        Version::new(
+            partial.major.unwrap_or(0),
+            partial.minor.unwrap_or(0),
+            partial.patch.unwrap_or(0),
+            partial.pre_release,
+            partial.build,
+        )
     }
 }
 
@@ -1261,13 +1231,13 @@ fn tilde<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseEr
                 ..
             },
         ) => BoundSet::new(
-            Bound::Lower(Predicate::Including(Version {
+            Bound::Lower(Predicate::Including(Version::new(
                 major,
                 minor,
-                patch: patch.unwrap_or(0),
+                patch.unwrap_or(0),
                 pre_release,
-                build: vec![],
-            })),
+                vec![],
+            ))),
             Bound::Upper(Predicate::Excluding((major, minor + 1, 0, 0).into())),
         ),
         (
@@ -1280,13 +1250,13 @@ fn tilde<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseEr
                 ..
             },
         ) => BoundSet::new(
-            Bound::Lower(Predicate::Including(Version {
+            Bound::Lower(Predicate::Including(Version::new(
                 major,
                 minor,
                 patch,
                 pre_release,
-                build: vec![],
-            })),
+                vec![],
+            ))),
             Bound::Upper(Predicate::Excluding((major, minor + 1, 0, 0).into())),
         ),
         (
@@ -1364,13 +1334,13 @@ fn caret<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseEr
                 pre_release,
                 ..
             } => BoundSet::new(
-                Bound::Lower(Predicate::Including(Version {
+                Bound::Lower(Predicate::Including(Version::new(
                     major,
                     minor,
                     patch,
                     pre_release,
-                    build: vec![],
-                })),
+                    vec![],
+                ))),
                 Bound::Upper(Predicate::Excluding(match (major, minor, patch) {
                     (0, 0, n) => Version::from((0, 0, n + 1, 0)),
                     (0, n, _) => Version::from((0, n + 1, 0, 0)),
@@ -1398,37 +1368,19 @@ fn hyphen<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseE
                 minor: None,
                 patch: None,
                 ..
-            } => Predicate::Excluding(Version {
-                major: 0,
-                minor: 0,
-                patch: 0,
-                pre_release: vec![Identifier::Numeric(0)],
-                build: vec![],
-            }),
+            } => Predicate::Excluding((0, 0, 0, 0).into()),
             Partial {
                 major: Some(major),
                 minor: None,
                 patch: None,
                 ..
-            } => Predicate::Excluding(Version {
-                major: major + 1,
-                minor: 0,
-                patch: 0,
-                pre_release: vec![Identifier::Numeric(0)],
-                build: vec![],
-            }),
+            } => Predicate::Excluding((major + 1, 0, 0, 0).into()),
             Partial {
                 major: Some(major),
                 minor: Some(minor),
                 patch: None,
                 ..
-            } => Predicate::Excluding(Version {
-                major,
-                minor: minor + 1,
-                patch: 0,
-                pre_release: vec![Identifier::Numeric(0)],
-                build: vec![],
-            }),
+            } => Predicate::Excluding((major, minor + 1, 0, 0).into()),
             partial => Predicate::Including(partial.into()),
         };
         let bounds = if let Some(lower) = lower {

@@ -1,4 +1,4 @@
-use crate::{Identifier, Version, MAX_SAFE_INTEGER};
+use crate::{Identifier, Identifiers, Version, MAX_SAFE_INTEGER};
 
 pub(crate) fn parse(input: &str) -> Option<Version> {
     let bytes = input.as_bytes();
@@ -31,46 +31,69 @@ pub(crate) fn parse(input: &str) -> Option<Version> {
     let (patch, next) = parse_core_number(bytes, i)?;
     i = next;
 
-    let mut pre_release = Vec::new();
-    let mut build = Vec::new();
-
     match bytes.get(i).copied() {
-        None => {}
-        Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C) => {}
+        None => Some(Version::new_empty(major, minor, patch)),
+        Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C) => {
+            Some(Version::new_empty(major, minor, patch))
+        }
         Some(b'+') => {
             let (parsed_build, _) = parse_identifiers(input, i + 1)?;
-            build = parsed_build;
+            Some(Version::new_with_identifiers(
+                major,
+                minor,
+                patch,
+                Identifiers::Empty,
+                parsed_build,
+            ))
         }
         Some(b'-') => {
             let (parsed_pre, next) = parse_identifiers(input, i + 1)?;
-            pre_release = parsed_pre;
             i = next;
 
             if bytes.get(i) == Some(&b'+') {
                 let (parsed_build, _) = parse_identifiers(input, i + 1)?;
-                build = parsed_build;
+                Some(Version::new_with_identifiers(
+                    major,
+                    minor,
+                    patch,
+                    parsed_pre,
+                    parsed_build,
+                ))
+            } else {
+                Some(Version::new_with_identifiers(
+                    major,
+                    minor,
+                    patch,
+                    parsed_pre,
+                    Identifiers::Empty,
+                ))
             }
         }
         Some(ch) if ch.is_ascii_alphanumeric() => {
             let (parsed_pre, next) = parse_identifiers(input, i)?;
-            pre_release = parsed_pre;
             i = next;
 
             if bytes.get(i) == Some(&b'+') {
                 let (parsed_build, _) = parse_identifiers(input, i + 1)?;
-                build = parsed_build;
+                Some(Version::new_with_identifiers(
+                    major,
+                    minor,
+                    patch,
+                    parsed_pre,
+                    parsed_build,
+                ))
+            } else {
+                Some(Version::new_with_identifiers(
+                    major,
+                    minor,
+                    patch,
+                    parsed_pre,
+                    Identifiers::Empty,
+                ))
             }
         }
-        _ => return None,
+        _ => None,
     }
-
-    Some(Version {
-        major,
-        minor,
-        patch,
-        pre_release,
-        build,
-    })
 }
 
 fn parse_core_number(bytes: &[u8], start: usize) -> Option<(u64, usize)> {
@@ -88,10 +111,10 @@ fn parse_core_number(bytes: &[u8], start: usize) -> Option<(u64, usize)> {
     (i > start).then_some((value, i))
 }
 
-fn parse_identifiers(input: &str, start: usize) -> Option<(Vec<Identifier>, usize)> {
+fn parse_identifiers(input: &str, start: usize) -> Option<(Identifiers, usize)> {
     let bytes = input.as_bytes();
     let mut i = start;
-    let mut identifiers = Vec::new();
+    let mut identifiers = Identifiers::Empty;
 
     loop {
         let ident_start = i;
