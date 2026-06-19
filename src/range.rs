@@ -19,6 +19,8 @@ use crate::{
     MAX_SAFE_INTEGER,
 };
 
+mod fast;
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 struct BoundSet {
     upper: Box<Bound>,
@@ -516,6 +518,10 @@ impl Range {
 
         if input.split("||").all(|part| part.trim().is_empty()) {
             return Ok(Self::any());
+        }
+
+        if let Some(range) = fast::parse(input) {
+            return Ok(range);
         }
 
         match range_set.parse_next(&mut input) {
