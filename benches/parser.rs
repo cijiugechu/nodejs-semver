@@ -31,6 +31,16 @@ const SATISFIES_CASES: &[(&str, &str, &str)] = &[
         ">=3.3.0-beta.1 <3.4.0-beta.3",
         "3.4.5",
     ),
+    (
+        "prerelease_matching_core_true",
+        ">=1.2.3-alpha <2.0.0",
+        "1.2.3-beta",
+    ),
+    (
+        "prerelease_non_matching_core_false",
+        ">=1.2.3-alpha <2.0.0",
+        "1.2.4-beta",
+    ),
 ];
 
 const FILTER_VERSIONS: &[&str] = &[

@@ -105,7 +105,7 @@ pub(super) fn parse(input: &str) -> Option<Range> {
     }
 
     if let Some(range) = parse_exact_version(bytes)
-        .and_then(|version| BoundSet::exact(version).map(|bound_set| Range(vec![bound_set])))
+        .and_then(|version| BoundSet::exact(version).map(Range::from_bound_set))
     {
         return Some(range);
     }
@@ -140,11 +140,10 @@ fn parse_or(input: &str) -> Option<Range> {
             return None;
         }
 
-        let Range(mut part_sets) = parse(part)?;
-        sets.append(&mut part_sets);
+        parse(part)?.append_bound_sets_to(&mut sets);
     }
 
-    (!sets.is_empty()).then_some(Range(sets))
+    Range::from_bound_sets(sets)
 }
 
 fn parse_hyphen(input: &str, has_plus: bool) -> Option<Range> {
@@ -171,7 +170,7 @@ fn parse_hyphen(input: &str, has_plus: bool) -> Option<Range> {
         Bound::Lower(Predicate::Including(partial_to_version(lower))),
         Bound::Upper(hyphen_upper(upper)),
     )
-    .map(|bound| Range(vec![bound]))
+    .map(Range::from_bound_set)
 }
 
 fn hyphen_upper(partial: Partial) -> Predicate {
@@ -231,7 +230,7 @@ fn parse_comparator_set(input: &str, has_plus: bool) -> Option<Range> {
         }
     }
 
-    current.map(|bound| Range(vec![bound]))
+    current.map(Range::from_bound_set)
 }
 
 fn parse_comparator(input: &str, start: usize) -> Option<(BoundSet, usize)> {
@@ -394,7 +393,7 @@ fn parse_caret(input: &str) -> Option<Range> {
         return None;
     }
 
-    caret_range(partial).map(|bound| Range(vec![bound]))
+    caret_range(partial).map(Range::from_bound_set)
 }
 
 fn parse_partial_wildcard(input: &str) -> Option<Range> {
@@ -403,7 +402,7 @@ fn parse_partial_wildcard(input: &str) -> Option<Range> {
         return None;
     }
 
-    partial_wildcard_range(partial).map(|bound| Range(vec![bound]))
+    partial_wildcard_range(partial).map(Range::from_bound_set)
 }
 
 fn partial_wildcard_range(partial: Partial) -> Option<BoundSet> {

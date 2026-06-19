@@ -13,6 +13,7 @@ use winnow::{ModalResult, Parser};
 
 #[cfg(feature = "serde")]
 use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
+use smallvec::SmallVec;
 use thiserror::Error;
 
 use crate::{
@@ -493,7 +494,7 @@ details that allow some more interesting set-level operations.
 For details on supported syntax, see <https://github.com/npm/node-semver#advanced-range-syntax>
 */
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Range(Vec<BoundSet>);
+pub struct Range(SmallVec<[BoundSet; 1]>);
 
 impl fmt::Display for OutsideDirection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -533,6 +534,24 @@ impl<'de> Deserialize<'de> for Range {
 }
 
 impl Range {
+    fn from_bound_set(bound_set: BoundSet) -> Self {
+        let mut bound_sets = SmallVec::new();
+        bound_sets.push(bound_set);
+        Self(bound_sets)
+    }
+
+    fn from_bound_sets(bound_sets: Vec<BoundSet>) -> Option<Self> {
+        (!bound_sets.is_empty()).then(|| Self(SmallVec::from_vec(bound_sets)))
+    }
+
+    fn append_bound_sets_to(self, bound_sets: &mut Vec<BoundSet>) {
+        bound_sets.extend(self.0);
+    }
+
+    fn iter(&self) -> std::slice::Iter<'_, BoundSet> {
+        self.0.iter()
+    }
+
     /**
     Parse a range from a string.
     */
@@ -578,7 +597,7 @@ impl Range {
     Creates a new range that matches any version.
     */
     pub fn any() -> Self {
-        Self(vec![BoundSet::new(Bound::lower(), Bound::upper()).unwrap()])
+        Self::from_bound_set(BoundSet::new(Bound::lower(), Bound::upper()).unwrap())
     }
 
     /**
@@ -604,8 +623,8 @@ impl Range {
     Returns true if `other` is a strict superset of this range.
     */
     pub fn allows_all(&self, other: &Range) -> bool {
-        for this in &self.0 {
-            for that in &other.0 {
+        for this in self.iter() {
+            for that in other.iter() {
                 if this.allows_all(that) {
                     return true;
                 }
@@ -619,8 +638,8 @@ impl Range {
     Returns true if `other` has overlap with this range.
     */
     pub fn allows_any(&self, other: &Range) -> bool {
-        for this in &self.0 {
-            for that in &other.0 {
+        for this in self.iter() {
+            for that in other.iter() {
                 if this.allows_any(that) {
                     return true;
                 }
@@ -636,19 +655,15 @@ impl Range {
     pub fn intersect(&self, other: &Self) -> Option<Self> {
         let mut sets = Vec::new();
 
-        for lefty in &self.0 {
-            for righty in &other.0 {
+        for lefty in self.iter() {
+            for righty in other.iter() {
                 if let Some(set) = lefty.intersect(righty) {
                     sets.push(set)
                 }
             }
         }
 
-        if sets.is_empty() {
-            None
-        } else {
-            Some(Self(sets))
-        }
+        Self::from_bound_sets(sets)
     }
 
     /**
@@ -657,19 +672,15 @@ impl Range {
     pub fn difference(&self, other: &Self) -> Option<Self> {
         let mut predicates = Vec::new();
 
-        for lefty in &self.0 {
-            for righty in &other.0 {
+        for lefty in self.iter() {
+            for righty in other.iter() {
                 if let Some(mut range) = lefty.difference(righty) {
                     predicates.append(&mut range)
                 }
             }
         }
 
-        if predicates.is_empty() {
-            None
-        } else {
-            Some(Self(predicates))
-        }
+        Self::from_bound_sets(predicates)
     }
 
     /// Return the highest [Version] in the list that satisfies the range,
@@ -696,7 +707,7 @@ impl Range {
     Return the lowest [Version] that can possibly match the given range.
     */
     pub fn min_version(&self) -> Option<Version> {
-        if let Some(min_bound) = self.0.iter().map(|range| &range.lower).min() {
+        if let Some(min_bound) = self.iter().map(|range| &range.lower).min() {
             match min_bound {
                 Bound::Lower(pred) => match pred {
                     Predicate::Including(v) => Some(v.clone()),
@@ -739,7 +750,7 @@ impl Range {
             return Ok(false);
         }
 
-        for range in &self.0 {
+        for range in self.iter() {
             let mut high: Option<Comparator> = None;
             let mut low: Option<Comparator> = None;
 
@@ -793,7 +804,7 @@ impl Range {
             return Ok(false);
         }
 
-        for range in &self.0 {
+        for range in self.iter() {
             let mut high: Option<Comparator> = None;
             let mut low: Option<Comparator> = None;
 
@@ -860,7 +871,7 @@ impl Range {
 
 impl fmt::Display for Range {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, range) in self.0.iter().enumerate() {
+        for (i, range) in self.iter().enumerate() {
             if i > 0 {
                 write!(f, "||")?;
             }
@@ -924,7 +935,7 @@ fn range_set<'s>(input: &mut &'s str) -> ModalResult<Range, SemverParseError<&'s
                 context: None,
             })
         } else {
-            Ok(Range(sets))
+            Ok(Range::from_bound_sets(sets).expect("non-empty bound sets"))
         }
     })
     .parse_next(input)
