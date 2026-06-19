@@ -21,6 +21,7 @@ use winnow::{ModalResult, Parser};
 pub use range::*;
 
 mod range;
+mod version_fast;
 
 /// JavaScript's
 /// [MAX_SAFE_INTEGER](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER).
@@ -584,6 +585,10 @@ impl Version {
             });
         }
 
+        if let Some(version) = version_fast::parse(input) {
+            return Ok(version);
+        }
+
         match version.parse_next(&mut input) {
             Ok(arg) => Ok(arg),
             Err(err) => Err(match err {
@@ -985,7 +990,7 @@ pub(crate) fn number<'s>(input: &mut &'s str) -> ModalResult<u64, SemverParseErr
     let copied = input.clone();
 
     Parser::try_map(Parser::take(digit1), |raw| {
-        let value = str::parse(raw).map_err(|e| SemverParseError {
+        let value = parse_u64_digits(raw).map_err(|e| SemverParseError {
             input: copied,
             context: None,
             kind: Some(SemverErrorKind::ParseIntError(e)),
@@ -1003,6 +1008,23 @@ pub(crate) fn number<'s>(input: &mut &'s str) -> ModalResult<u64, SemverParseErr
     })
     .context("number component")
     .parse_next(input)
+}
+
+fn parse_u64_digits(raw: &str) -> Result<u64, ParseIntError> {
+    let mut value = 0u64;
+
+    for ch in raw.bytes() {
+        let digit = u64::from(ch - b'0');
+        let Some(next) = value
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(digit))
+        else {
+            return raw.parse::<u64>();
+        };
+        value = next;
+    }
+
+    Ok(value)
 }
 
 #[cfg(test)]
