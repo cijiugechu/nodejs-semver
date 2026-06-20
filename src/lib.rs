@@ -366,6 +366,16 @@ pub struct Version {
     meta: Option<Box<VersionMeta>>,
 }
 
+/// Owned components of a [`Version`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VersionParts {
+    pub major: u64,
+    pub minor: u64,
+    pub patch: u64,
+    pub pre_release: Vec<Identifier>,
+    pub build: Vec<Identifier>,
+}
+
 #[derive(Clone, Debug)]
 struct VersionMeta {
     build: Identifiers,
@@ -391,6 +401,15 @@ impl Identifiers {
                 Self::Two([first, second])
             }
             _ => Self::Many(identifiers),
+        }
+    }
+
+    fn into_vec(self) -> Vec<Identifier> {
+        match self {
+            Self::Empty => Vec::new(),
+            Self::One(identifier) => vec![identifier],
+            Self::Two(identifiers) => Vec::from(identifiers),
+            Self::Many(identifiers) => identifiers,
         }
     }
 
@@ -526,6 +545,60 @@ impl Version {
         self.meta
             .as_ref()
             .map_or(&[], |meta| meta.pre_release.as_slice())
+    }
+
+    /// Consumes this version and returns owned components.
+    ///
+    /// This moves build and prerelease identifiers out without cloning them.
+    ///
+    /// ```rust
+    /// use nodejs_semver::{Identifier, Version, VersionParts};
+    ///
+    /// let version = Version::parse("1.2.3-alpha.1+build.7").unwrap();
+    /// let VersionParts {
+    ///     major,
+    ///     minor,
+    ///     patch,
+    ///     pre_release,
+    ///     build,
+    /// } = version.into_parts();
+    ///
+    /// assert_eq!((major, minor, patch), (1, 2, 3));
+    /// assert_eq!(
+    ///     pre_release,
+    ///     vec![Identifier::AlphaNumeric("alpha".into()), Identifier::Numeric(1)]
+    /// );
+    /// assert_eq!(
+    ///     build,
+    ///     vec![
+    ///         Identifier::AlphaNumeric("build".into()),
+    ///         Identifier::Numeric(7)
+    ///     ]
+    /// );
+    /// ```
+    pub fn into_parts(self) -> VersionParts {
+        let Version {
+            major,
+            minor,
+            patch,
+            meta,
+        } = self;
+
+        let (pre_release, build) = match meta {
+            Some(meta) => {
+                let VersionMeta { build, pre_release } = *meta;
+                (pre_release.into_vec(), build.into_vec())
+            }
+            None => (Vec::new(), Vec::new()),
+        };
+
+        VersionParts {
+            major,
+            minor,
+            patch,
+            pre_release,
+            build,
+        }
     }
 
     fn metadata_mut(&mut self) -> &mut VersionMeta {
@@ -1748,6 +1821,38 @@ mod tests {
                 vec![AlphaNumeric("abc".into()), Numeric(123)],
                 vec![Numeric(1)],
             )
+        );
+    }
+
+    #[test]
+    fn into_parts_with_metadata() {
+        let parts = Version::parse("1.2.34-abc.123+1").unwrap().into_parts();
+
+        assert_eq!(
+            parts,
+            VersionParts {
+                major: 1,
+                minor: 2,
+                patch: 34,
+                pre_release: vec![AlphaNumeric("abc".into()), Numeric(123)],
+                build: vec![Numeric(1)],
+            }
+        );
+    }
+
+    #[test]
+    fn into_parts_without_metadata() {
+        let parts = Version::parse("1.2.34").unwrap().into_parts();
+
+        assert_eq!(
+            parts,
+            VersionParts {
+                major: 1,
+                minor: 2,
+                patch: 34,
+                pre_release: Vec::new(),
+                build: Vec::new(),
+            }
         );
     }
 
