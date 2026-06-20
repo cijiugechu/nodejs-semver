@@ -7,7 +7,6 @@ use winnow::ascii::{space0, space1};
 use winnow::combinator::{
     alt, delimited, eof, opt, peek, preceded, repeat_till, separated, terminated,
 };
-use winnow::error::ErrMode;
 use winnow::token::{any, literal};
 use winnow::{ModalResult, Parser};
 
@@ -18,11 +17,13 @@ use thiserror::Error;
 
 use crate::{
     Identifier, MAX_SAFE_INTEGER, SemverError, SemverErrorKind, SemverParseError, Version, extras,
-    number,
+    number, semver_error_from_parse,
 };
 
 mod fast;
 
+#[cold]
+#[inline(never)]
 fn no_valid_ranges_error(input: &str) -> SemverError {
     SemverError {
         input: input.into(),
@@ -646,24 +647,7 @@ impl Range {
 
         match range_set.parse_next(&mut input) {
             Ok(range) => Ok(range),
-            Err(err) => Err(match err {
-                ErrMode::Backtrack(e) | ErrMode::Cut(e) => SemverError {
-                    input: input.into(),
-                    span: (e.input.as_ptr() as usize - input.as_ptr() as usize, 0).into(),
-                    kind: if let Some(kind) = e.kind {
-                        kind
-                    } else if let Some(ctx) = e.context {
-                        SemverErrorKind::Context(ctx)
-                    } else {
-                        SemverErrorKind::Other
-                    },
-                },
-                ErrMode::Incomplete(_) => SemverError {
-                    input: input.into(),
-                    span: (input.len() - 1, 0).into(),
-                    kind: SemverErrorKind::IncompleteInput,
-                },
-            }),
+            Err(err) => Err(semver_error_from_parse(input, err)),
         }
     }
 

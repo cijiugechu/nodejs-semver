@@ -251,6 +251,42 @@ impl<'a> FromExternalError<&'a str, SemverParseError<&'a str>> for SemverParseEr
     }
 }
 
+#[cold]
+#[inline(never)]
+fn max_length_error(input: &str) -> SemverError {
+    SemverError {
+        input: input.into(),
+        span: (input.len() - 1, 0).into(),
+        kind: SemverErrorKind::MaxLengthError,
+    }
+}
+
+#[cold]
+#[inline(never)]
+pub(crate) fn semver_error_from_parse(
+    input: &str,
+    err: ErrMode<SemverParseError<&str>>,
+) -> SemverError {
+    match err {
+        ErrMode::Backtrack(e) | ErrMode::Cut(e) => SemverError {
+            input: input.into(),
+            span: (e.input.as_ptr() as usize - input.as_ptr() as usize, 0).into(),
+            kind: if let Some(kind) = e.kind {
+                kind
+            } else if let Some(ctx) = e.context {
+                SemverErrorKind::Context(ctx)
+            } else {
+                SemverErrorKind::Other
+            },
+        },
+        ErrMode::Incomplete(_) => SemverError {
+            input: input.into(),
+            span: (input.len() - 1, 0).into(),
+            kind: SemverErrorKind::IncompleteInput,
+        },
+    }
+}
+
 /**
 An Identifier type for build and prerelease metadata.
 */
@@ -368,9 +404,9 @@ A semantic version, conformant to the [semver spec](https://semver.org/spec/v2.0
 */
 #[derive(Clone, Debug)]
 pub struct Version {
-    pub major: u64,
-    pub minor: u64,
-    pub patch: u64,
+    major: u64,
+    minor: u64,
+    patch: u64,
     meta: Option<Box<VersionMeta>>,
 }
 
@@ -476,6 +512,21 @@ impl<'de> Deserialize<'de> for Version {
 }
 
 impl Version {
+    /// Returns the major version.
+    pub fn major(&self) -> u64 {
+        self.major
+    }
+
+    /// Returns the minor version.
+    pub fn minor(&self) -> u64 {
+        self.minor
+    }
+
+    /// Returns the patch version.
+    pub fn patch(&self) -> u64 {
+        self.patch
+    }
+
     pub fn new(
         major: u64,
         minor: u64,
@@ -838,11 +889,7 @@ impl Version {
         let mut input = input.as_ref();
 
         if input.len() > MAX_LENGTH {
-            return Err(SemverError {
-                input: input.into(),
-                span: (input.len() - 1, 0).into(),
-                kind: SemverErrorKind::MaxLengthError,
-            });
+            return Err(max_length_error(input));
         }
 
         if let Some(version) = version_fast::parse(input) {
@@ -850,25 +897,8 @@ impl Version {
         }
 
         match version.parse_next(&mut input) {
-            Ok(arg) => Ok(arg),
-            Err(err) => Err(match err {
-                ErrMode::Backtrack(e) | ErrMode::Cut(e) => SemverError {
-                    input: input.into(),
-                    span: (e.input.as_ptr() as usize - input.as_ptr() as usize, 0).into(),
-                    kind: if let Some(kind) = e.kind {
-                        kind
-                    } else if let Some(ctx) = e.context {
-                        SemverErrorKind::Context(ctx)
-                    } else {
-                        SemverErrorKind::Other
-                    },
-                },
-                ErrMode::Incomplete(_) => SemverError {
-                    input: input.into(),
-                    span: (input.len() - 1, 0).into(),
-                    kind: SemverErrorKind::IncompleteInput,
-                },
-            }),
+            Ok(version) => Ok(version),
+            Err(err) => Err(semver_error_from_parse(input, err)),
         }
     }
 
@@ -1778,6 +1808,7 @@ mod tests {
     fn trivial_version_number() {
         let v = Version::parse("1.2.34").unwrap();
 
+        assert_eq!((v.major(), v.minor(), v.patch()), (1, 2, 34));
         assert_eq!(
             v,
             Version::new(1, 2, 34, Vec::with_capacity(2), Vec::with_capacity(2))
