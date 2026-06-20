@@ -23,6 +23,72 @@ use crate::{
 
 mod fast;
 
+fn no_valid_ranges_error(input: &str) -> SemverError {
+    SemverError {
+        input: input.into(),
+        span: (input.len(), 0).into(),
+        kind: SemverErrorKind::NoValidRanges,
+    }
+}
+
+fn should_skip_range_fallback(input: &str) -> bool {
+    let input = input.trim();
+    if starts_with_range_token(input) {
+        return false;
+    }
+
+    is_single_unparseable_token(input)
+}
+
+fn starts_with_range_token(input: &str) -> bool {
+    input
+        .as_bytes()
+        .first()
+        .is_some_and(|ch| is_possible_range_token(*ch))
+}
+
+fn is_possible_range_token(ch: u8) -> bool {
+    matches!(
+        ch,
+        b'0'..=b'9' | b'v' | b'V' | b'x' | b'X' | b'*' | b'>' | b'<' | b'=' | b'^' | b'~'
+    )
+}
+
+fn is_single_unparseable_token(input: &str) -> bool {
+    let mut has_colon = false;
+    let mut has_possible_range_token = false;
+    let mut previous_was_pipe = false;
+
+    for ch in input.bytes() {
+        if is_range_token_separator(ch) {
+            return false;
+        }
+
+        if ch == b':' {
+            has_colon = true;
+        }
+
+        if is_possible_range_token(ch) {
+            has_possible_range_token = true;
+        }
+
+        if ch == b'|' {
+            if previous_was_pipe {
+                return false;
+            }
+            previous_was_pipe = true;
+        } else {
+            previous_was_pipe = false;
+        }
+    }
+
+    has_colon || !has_possible_range_token
+}
+
+fn is_range_token_separator(ch: u8) -> bool {
+    matches!(ch, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 struct BoundSet {
     bounds: Box<BoundPair>,
@@ -567,6 +633,14 @@ impl Range {
         }
 
         if let Some(range) = fast::parse(input) {
+            return Ok(range);
+        }
+
+        if should_skip_range_fallback(input) {
+            return Err(no_valid_ranges_error(input));
+        }
+
+        if let Some(range) = fast::parse_garbage(input) {
             return Ok(range);
         }
 
@@ -2424,6 +2498,22 @@ mod tests {
         consistent => ["^1.0.1", ">=1.0.1 <2.0.0-0"],
         consistent2 => [">=1.0.1 <2.0.0-0", ">=1.0.1 <2.0.0-0"],
     ];
+
+    #[test]
+    fn rejects_single_token_garbage_and_protocols() {
+        for input in [
+            "foo",
+            "workspace:*",
+            "npm:react-dom@19.3.0-canary-b1786c31-20260618",
+        ] {
+            assert_eq!(
+                Range::parse(input).unwrap_err().kind(),
+                &SemverErrorKind::NoValidRanges
+            );
+        }
+
+        assert_eq!(Range::parse("foo 1.2.3").unwrap().to_string(), "1.2.3");
+    }
 
     /*
     // And these weirdos that I don't know what to do with.

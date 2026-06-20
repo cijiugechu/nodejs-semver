@@ -131,6 +131,63 @@ pub(super) fn parse(input: &str) -> Option<Range> {
     None
 }
 
+pub(super) fn parse_garbage(input: &str) -> Option<Range> {
+    if !input.bytes().any(is_space_byte) {
+        return None;
+    }
+
+    let mut sets = Vec::new();
+
+    for part in input.split("||") {
+        let mut current: Option<BoundSet> = None;
+
+        for token in part.split_whitespace() {
+            if token_requires_fallback(token) {
+                return None;
+            }
+
+            let Some(bound_set) = parse_single_token(token) else {
+                continue;
+            };
+
+            current = Some(if let Some(current) = current {
+                if let Some(bound) = current.intersect(&bound_set) {
+                    bound
+                } else {
+                    sets.push(current);
+                    bound_set
+                }
+            } else {
+                bound_set
+            });
+        }
+
+        if let Some(bound_set) = current {
+            sets.push(bound_set);
+        }
+    }
+
+    Range::from_bound_sets(sets)
+}
+
+fn parse_single_token(token: &str) -> Option<BoundSet> {
+    let mut bound_sets = Vec::new();
+    parse(token)?.append_bound_sets_to(&mut bound_sets);
+
+    if bound_sets.len() == 1 {
+        bound_sets.pop()
+    } else {
+        None
+    }
+}
+
+fn token_requires_fallback(token: &str) -> bool {
+    matches!(
+        token,
+        "-" | ">" | ">=" | "<" | "<=" | "=" | "^" | "~" | "~>"
+    ) || token.bytes().any(|ch| matches!(ch, b'-' | b'+'))
+}
+
 fn parse_or_if_present(input: &str) -> Option<Range> {
     contains_or_fast(input).then(|| parse_or(input)).flatten()
 }
@@ -156,7 +213,7 @@ fn parse_hyphen(input: &str, has_plus: bool) -> Option<Range> {
     }
 
     let bytes = input.as_bytes();
-    let (lower, mut i) = parse_partial(input, 0)?;
+    let (lower, mut i) = parse_partial_loose(input, 0)?;
 
     i = skip_spaces1(bytes, i)?;
     if bytes.get(i) != Some(&b'-') {
@@ -165,7 +222,7 @@ fn parse_hyphen(input: &str, has_plus: bool) -> Option<Range> {
     i += 1;
     i = skip_spaces1(bytes, i)?;
 
-    let (upper, i) = parse_partial(input, i)?;
+    let (upper, i) = parse_partial_loose(input, i)?;
     if i != bytes.len() {
         return None;
     }
@@ -245,7 +302,7 @@ fn parse_comparator(input: &str, start: usize) -> Option<(BoundSet, usize)> {
         i += 1;
     }
 
-    let (partial, i) = parse_partial(input, i)?;
+    let (partial, i) = parse_partial_loose(input, i)?;
     primitive_range(operation, partial).map(|bound| (bound, i))
 }
 
@@ -392,7 +449,7 @@ fn parse_caret(input: &str) -> Option<Range> {
         i += 1;
     }
 
-    let (partial, i) = parse_partial(input, i)?;
+    let (partial, i) = parse_partial_loose(input, i)?;
     if i != bytes.len() {
         return None;
     }
@@ -415,7 +472,7 @@ fn parse_tilde(input: &str) -> Option<Range> {
         }
     }
 
-    let (partial, i) = parse_partial(input, i)?;
+    let (partial, i) = parse_partial_loose(input, i)?;
     if i != bytes.len() {
         return None;
     }
@@ -593,7 +650,11 @@ fn parse_number(bytes: &[u8], start: usize) -> Option<(u64, usize)> {
 }
 
 fn is_space(ch: Option<u8>) -> bool {
-    matches!(ch, Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C))
+    ch.is_some_and(is_space_byte)
+}
+
+fn is_space_byte(ch: u8) -> bool {
+    matches!(ch, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
 }
 
 fn skip_spaces1(bytes: &[u8], start: usize) -> Option<usize> {
@@ -618,6 +679,18 @@ struct Partial {
 }
 
 fn parse_partial(input: &str, start: usize) -> Option<(Partial, usize)> {
+    parse_partial_inner(input, start, false)
+}
+
+fn parse_partial_loose(input: &str, start: usize) -> Option<(Partial, usize)> {
+    parse_partial_inner(input, start, true)
+}
+
+fn parse_partial_inner(
+    input: &str,
+    start: usize,
+    allow_loose_suffix: bool,
+) -> Option<(Partial, usize)> {
     let bytes = input.as_bytes();
     let mut i = start;
 
@@ -652,6 +725,12 @@ fn parse_partial(input: &str, start: usize) -> Option<(Partial, usize)> {
             if patch.is_some() {
                 if bytes.get(i) == Some(&b'-') {
                     let (parsed_pre, next) = parse_identifiers(input, i + 1)?;
+                    pre_release = parsed_pre;
+                    i = next;
+                } else if allow_loose_suffix
+                    && bytes.get(i).is_some_and(|ch| ch.is_ascii_alphanumeric())
+                {
+                    let (parsed_pre, next) = parse_identifiers(input, i)?;
                     pre_release = parsed_pre;
                     i = next;
                 }
@@ -774,7 +853,36 @@ mod tests {
     }
 
     #[test]
-    fn leaves_loose_tilde_suffix_to_fallback() {
-        assert!(parse("~1.2.3beta").is_none());
+    fn parses_loose_prerelease_suffixes() {
+        let cases = [
+            ("~1.2.3beta", ">=1.2.3-beta <1.3.0-0"),
+            ("^1.0.0alpha", ">=1.0.0-alpha <2.0.0-0"),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(parse(input).unwrap().to_string(), expected);
+        }
+
+        assert!(parse("1.2.3beta").is_none());
+    }
+
+    #[test]
+    fn parses_simple_garbage_ranges() {
+        let cases = [
+            ("1.2.3 foo", "1.2.3"),
+            ("foo 1.2.3", "1.2.3"),
+            ("~1.y 1.2.3", "1.2.3"),
+            ("1.2.3 ~1.y", "1.2.3"),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(parse_garbage(input).unwrap().to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn leaves_complex_garbage_ranges_to_fallback() {
+        assert!(parse_garbage("foo >= 1.2.3").is_none());
+        assert!(parse_garbage("foo 1.2.3-beta").is_none());
     }
 }

@@ -21,6 +21,18 @@ const RANGE_CASES: &[(&str, &str)] = &[
     ("prerelease_bounds", ">=3.3.0-beta.1 <3.4.0-beta.3"),
 ];
 
+const RANGE_FALLBACK_ATTEMPT_CASES: &[(&str, &str)] = &[
+    ("garbage_suffix", "1.2.3 foo"),
+    ("garbage_prefix", "foo 1.2.3"),
+    ("garbage_invalid_then_valid", "~1.y 1.2.3"),
+    ("loose_tilde_suffix", "~1.2.3beta"),
+    ("loose_caret_suffix", "^1.0.0alpha"),
+    ("loose_plain_suffix", "1.2.3beta"),
+    ("bare_garbage", "foo"),
+    ("workspace_protocol", "workspace:*"),
+    ("npm_alias", "npm:react-dom@19.3.0-canary-b1786c31-20260618"),
+];
+
 const SATISFIES_CASES: &[(&str, &str, &str)] = &[
     ("exact_true", "1.2.3", "1.2.3"),
     ("comparator_true", ">=1.2.3-rc.4", "1.2.3"),
@@ -347,6 +359,18 @@ fn bench_range_parse(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_range_parse_fallback_attempt(c: &mut Criterion) {
+    let mut group = c.benchmark_group("range_parse_fallback_attempt");
+
+    for (name, input) in RANGE_FALLBACK_ATTEMPT_CASES {
+        group.bench_with_input(BenchmarkId::from_parameter(name), input, |b, input| {
+            b.iter(|| black_box(Range::parse(black_box(*input)).is_ok()));
+        });
+    }
+
+    group.finish();
+}
+
 fn bench_satisfies(c: &mut Criterion) {
     let mut group = c.benchmark_group("satisfies_parsed");
 
@@ -477,6 +501,7 @@ criterion_group!(
     benches,
     bench_version_parse,
     bench_range_parse,
+    bench_range_parse_fallback_attempt,
     bench_satisfies,
     bench_parse_and_satisfies,
     bench_filter_version_strings,
