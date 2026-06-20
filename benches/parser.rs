@@ -16,6 +16,8 @@ const RANGE_CASES: &[(&str, &str)] = &[
     ("or", ">=18 <20 || >=22"),
     ("wildcard", "1.x.x"),
     ("hyphen_wildcard", "1.0.0 - 1.0.x"),
+    ("tilde", "~1.2.3"),
+    ("tilde_gt", "~>3.2.1"),
     ("prerelease_bounds", ">=3.3.0-beta.1 <3.4.0-beta.3"),
 ];
 

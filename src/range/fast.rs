@@ -99,6 +99,10 @@ pub(super) fn parse(input: &str) -> Option<Range> {
         return parse_caret(input).or_else(|| parse_or_if_present(input));
     }
 
+    if first == Some(b'~') {
+        return parse_tilde(input).or_else(|| parse_or_if_present(input));
+    }
+
     if matches!(first, Some(b'>' | b'<' | b'=')) {
         return parse_comparator_set(input, contains_byte_fast(bytes, b'+'))
             .or_else(|| parse_or_if_present(input));
@@ -396,6 +400,29 @@ fn parse_caret(input: &str) -> Option<Range> {
     caret_range(partial).map(Range::from_bound_set)
 }
 
+fn parse_tilde(input: &str) -> Option<Range> {
+    let bytes = input.as_bytes();
+    let mut i = 1;
+
+    while is_space(bytes.get(i).copied()) {
+        i += 1;
+    }
+
+    if bytes.get(i) == Some(&b'>') {
+        i += 1;
+        while is_space(bytes.get(i).copied()) {
+            i += 1;
+        }
+    }
+
+    let (partial, i) = parse_partial(input, i)?;
+    if i != bytes.len() {
+        return None;
+    }
+
+    tilde_range(partial).map(Range::from_bound_set)
+}
+
 fn parse_partial_wildcard(input: &str) -> Option<Range> {
     let (partial, i) = parse_partial(input, 0)?;
     if i != input.len() {
@@ -425,6 +452,40 @@ fn partial_wildcard_range(partial: Partial) -> Option<BoundSet> {
             ..
         } => BoundSet::new(
             Bound::Lower(Predicate::Including(Version::from((major, minor, 0)))),
+            Bound::Upper(Predicate::Excluding(Version::from((
+                major,
+                minor + 1,
+                0,
+                0,
+            )))),
+        ),
+        _ => None,
+    }
+}
+
+fn tilde_range(partial: Partial) -> Option<BoundSet> {
+    match partial {
+        Partial {
+            major: Some(major),
+            minor: None,
+            ..
+        } => BoundSet::new(
+            Bound::Lower(Predicate::Including(Version::from((major, 0, 0)))),
+            Bound::Upper(Predicate::Excluding(Version::from((major + 1, 0, 0, 0)))),
+        ),
+        Partial {
+            major: Some(major),
+            minor: Some(minor),
+            patch,
+            pre_release,
+        } => BoundSet::new(
+            Bound::Lower(Predicate::Including(Version::new_with_identifiers(
+                major,
+                minor,
+                patch.unwrap_or(0),
+                pre_release,
+                Identifiers::Empty,
+            ))),
             Bound::Upper(Predicate::Excluding(Version::from((
                 major,
                 minor + 1,
@@ -693,5 +754,27 @@ mod tests {
         assert!(!contains_byte_fast(b"12345678901234567-meta", b'+'));
         assert!(contains_or_fast("12345678901234567||next"));
         assert!(!contains_or_fast("12345678901234567|next"));
+    }
+
+    #[test]
+    fn parses_tilde_ranges() {
+        let cases = [
+            ("~1", ">=1.0.0 <2.0.0-0"),
+            ("~1.2", ">=1.2.0 <1.3.0-0"),
+            ("~1.2.3", ">=1.2.3 <1.3.0-0"),
+            ("~1.2.3-beta", ">=1.2.3-beta <1.3.0-0"),
+            ("~>3.2.1", ">=3.2.1 <3.3.0-0"),
+            ("~> 1", ">=1.0.0 <2.0.0-0"),
+            ("~ > 1.2.3", ">=1.2.3 <1.3.0-0"),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(parse(input).unwrap().to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn leaves_loose_tilde_suffix_to_fallback() {
+        assert!(parse("~1.2.3beta").is_none());
     }
 }
