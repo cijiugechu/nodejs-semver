@@ -1,5 +1,5 @@
 use super::{Bound, BoundSet, Operation, Predicate, Range};
-use crate::{Identifier, Identifiers, Version, MAX_SAFE_INTEGER};
+use crate::{Identifier, Identifiers, MAX_SAFE_INTEGER, Version};
 
 const SHORT_SCAN_MAX: usize = 16;
 const BYTE_LANE_LOW_BITS: u128 = 0x0101_0101_0101_0101_0101_0101_0101_0101;

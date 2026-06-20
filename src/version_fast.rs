@@ -1,4 +1,4 @@
-use crate::{Identifier, Identifiers, Version, MAX_SAFE_INTEGER};
+use crate::{Identifier, Identifiers, MAX_SAFE_INTEGER, Version};
 
 pub(crate) fn parse(input: &str) -> Option<Version> {
     let bytes = input.as_bytes();

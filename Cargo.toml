@@ -10,8 +10,8 @@ exclude = ["./node-semver"]
 categories = ["parser-implementations", "data-structures", "value-formatting"]
 license = "Apache-2.0"
 readme = "README.md"
-rust-version = "1.70.0"
-edition = "2021"
+rust-version = "1.85.0"
+edition = "2024"
 
 [dependencies]
 miette = "7.6"

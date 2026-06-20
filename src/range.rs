@@ -12,13 +12,13 @@ use winnow::token::{any, literal};
 use winnow::{ModalResult, Parser};
 
 #[cfg(feature = "serde")]
-use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
 use smallvec::SmallVec;
 use thiserror::Error;
 
 use crate::{
-    extras, number, Identifier, SemverError, SemverErrorKind, SemverParseError, Version,
-    MAX_SAFE_INTEGER,
+    Identifier, MAX_SAFE_INTEGER, SemverError, SemverErrorKind, SemverParseError, Version, extras,
+    number,
 };
 
 mod fast;
@@ -829,17 +829,11 @@ impl Range {
             let mut low: Option<Comparator> = None;
 
             for comparator in range.comparators() {
-                if high
-                    .as_ref()
-                    .map_or(true, |h| comparator.version > h.version)
-                {
+                if high.as_ref().is_none_or(|h| comparator.version > h.version) {
                     high = Some(comparator.clone());
                 }
 
-                if low
-                    .as_ref()
-                    .map_or(true, |l| comparator.version < l.version)
-                {
+                if low.as_ref().is_none_or(|l| comparator.version < l.version) {
                     low = Some(comparator);
                 }
             }
@@ -883,17 +877,11 @@ impl Range {
             let mut low: Option<Comparator> = None;
 
             for comparator in range.comparators() {
-                if high
-                    .as_ref()
-                    .map_or(true, |h| comparator.version < h.version)
-                {
+                if high.as_ref().is_none_or(|h| comparator.version < h.version) {
                     high = Some(comparator.clone());
                 }
 
-                if low
-                    .as_ref()
-                    .map_or(true, |l| comparator.version > l.version)
-                {
+                if low.as_ref().is_none_or(|l| comparator.version > l.version) {
                     low = Some(comparator);
                 }
             }

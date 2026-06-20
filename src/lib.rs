@@ -2,7 +2,7 @@
 #![allow(clippy::needless_doctest_main)]
 
 #[cfg(feature = "serde")]
-use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
 
 use std::cmp::{self, Ordering};
 use std::fmt;
@@ -166,7 +166,9 @@ pub enum SemverErrorKind {
     `nodejs-semver` inherits the JavaScript implementation's limitation on
     limiting integer component sizes to [MAX_SAFE_INTEGER].
     */
-    #[error("Integer component of semver string is larger than JavaScript's Number.MAX_SAFE_INTEGER: {0}")]
+    #[error(
+        "Integer component of semver string is larger than JavaScript's Number.MAX_SAFE_INTEGER: {0}"
+    )]
     #[diagnostic(code(nodejs_semver::integer_too_large), url(docsrs))]
     MaxIntError(u64),
 
@@ -179,7 +181,13 @@ pub enum SemverErrorKind {
     Context(&'static str),
 
     #[error("No valid ranges could be parsed")]
-    #[diagnostic(code(nodejs_semver::no_valid_ranges), url(docsrs), help("nodejs-semver parses in so-called 'loose' mode. This means that if you have a slightly incorrect semver operator (`>=1.y`, for ex.), it will get thrown away. This error only happens if _all_ your input ranges were invalid semver in this way."))]
+    #[diagnostic(
+        code(nodejs_semver::no_valid_ranges),
+        url(docsrs),
+        help(
+            "nodejs-semver parses in so-called 'loose' mode. This means that if you have a slightly incorrect semver operator (`>=1.y`, for ex.), it will get thrown away. This error only happens if _all_ your input ranges were invalid semver in this way."
+        )
+    )]
     NoValidRanges,
 
     /**
@@ -1984,7 +1992,10 @@ mod tests {
     fn individual_version_component_has_an_upper_bound() {
         let out_of_range = MAX_SAFE_INTEGER + 1;
         let v = Version::parse(format!("1.2.{}", out_of_range));
-        assert_eq!(v.expect_err("Parse should have failed.").to_string(), "Integer component of semver string is larger than JavaScript's Number.MAX_SAFE_INTEGER: 900719925474100");
+        assert_eq!(
+            v.expect_err("Parse should have failed.").to_string(),
+            "Integer component of semver string is larger than JavaScript's Number.MAX_SAFE_INTEGER: 900719925474100"
+        );
     }
 
     #[test]
