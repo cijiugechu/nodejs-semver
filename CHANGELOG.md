@@ -1,5 +1,88 @@
 # `nodejs-semver` Release Changelog
 
+<a name="5.0.0"></a>
+## 5.0.0 (2026-06-20)
+
+### Features
+
+* **version:** add `VersionParts` and `Version::into_parts()` for moving owned version components out without cloning ([8a7014f](https://github.com/cijiugechu/nodejs-semver/commit/8a7014fbd1fe244e8970c05e76232df6e2871849))
+
+* **range:** improve npm compatibility coverage for wildcard, hyphen, prerelease, and disjunction ranges ([4bce182](https://github.com/cijiugechu/nodejs-semver/commit/4bce182f5df287c117e0fc9edf3e69ee747c6c12))
+
+### Performance
+
+* **version:** add a fast path for common `Version::parse` inputs ([2764904](https://github.com/cijiugechu/nodejs-semver/commit/27649049dad315de3755582ea0011c6e015838eb))
+
+* **range:** add fast paths for common range parsing cases, including exact, comparator, wildcard, tilde, and fallback attempts ([413660e](https://github.com/cijiugechu/nodejs-semver/commit/413660ee971d3e88ce1bfb3e5c6be1e5d390aee8), [786b864](https://github.com/cijiugechu/nodejs-semver/commit/786b864d3507c9db188084df5dfea01f2b7a6669), [6bcc483](https://github.com/cijiugechu/nodejs-semver/commit/6bcc483e6653092240d9b46f9196432c846b5aca))
+
+* **layout:** compact `Version` and common single-range storage to reduce allocation and improve parse-heavy workloads ([2471252](https://github.com/cijiugechu/nodejs-semver/commit/2471252313f6fec692232143f62c39ea8f02e898), [439cb1e](https://github.com/cijiugechu/nodejs-semver/commit/439cb1e25646a6e8d59d9fdb00f8f2e8205964f5))
+
+Benchmarked with `cargo bench --bench parser`, using the same benchmark suite for `v4.2.0` and `5.0.0`. Values are Criterion slope estimates from the same machine.
+
+| benchmark | 4.2.0 | 5.0.0 | speedup |
+|---|---:|---:|---:|
+| `Version::parse("1.2.3")` | 60.52 ns | 4.86 ns | 12.46x |
+| `Version::parse("1.2.3-rc.4+build.7")` | 109.02 ns | 65.00 ns | 1.68x |
+| `Range::parse("1.2.3")` | 333.84 ns | 35.91 ns | 9.30x |
+| `Range::parse(">=1.2.3 <2.0.0")` | 464.21 ns | 103.39 ns | 4.49x |
+| <code>Range::parse("&gt;=18 &lt;20 &#124;&#124; &gt;=22")</code> | 584.19 ns | 261.19 ns | 2.24x |
+| `Range::parse("1.x.x")` | 314.54 ns | 58.80 ns | 5.35x |
+| parse and satisfy exact range | 386.88 ns | 44.45 ns | 8.70x |
+| parse and satisfy wildcard range | 365.71 ns | 65.97 ns | 5.54x |
+| filter version strings with current API | 774.59 ns | 221.29 ns | 3.50x |
+| package-manager corpus: resolved versions | 7.97 us | 914.05 ns | 8.71x |
+| package-manager corpus: specifier range parse attempts | 40.91 us | 7.39 us | 5.54x |
+| package-manager corpus: version-then-range parse | 21.61 us | 5.29 us | 4.09x |
+
+Grouped geomean speedups from the full benchmark suite: `version_parse` 4.36x, `range_parse` 4.20x, `range_parse_fallback_attempt` 3.97x, `parse_and_satisfies` 3.72x, and `package_manager_corpus` 5.01x. Already-parsed `Range::satisfies` microbenchmarks remain nanosecond-level and are mixed overall (`0.94x` geomean vs 4.2.0).
+
+### Miscellaneous Tasks
+
+* **bench:** expand parser benchmarks with npm-style range cases and package-manager corpus inputs ([2aef643](https://github.com/cijiugechu/nodejs-semver/commit/2aef643dc9d6504e242c4245698125c31102a33a))
+
+* **msrv:** bump MSRV to `1.85.0` and move the crate to Rust 2024 edition ([4abc489](https://github.com/cijiugechu/nodejs-semver/commit/4abc489bb4db4b3244c89300b0d4d7bba53a104b))
+
+### **BREAKING CHANGE**
+
+The minimum supported Rust version is now `1.85.0`.
+
+`Version` fields are no longer public. This lets the crate keep optimizing the internal representation without exposing layout details.
+
+Read fields through methods:
+
+```rust
+let version = Version::parse("1.2.3-alpha.1+build.7")?;
+
+let major = version.major();
+let minor = version.minor();
+let patch = version.patch();
+let pre_release = version.pre_release();
+let build = version.build();
+```
+
+Construct versions with `Version::new` instead of struct literals:
+
+```rust
+let version = Version::new(1, 2, 3, vec![], vec![]);
+```
+
+Move all owned components out with `into_parts()` when you previously destructured a `Version`:
+
+```rust
+use nodejs_semver::{Version, VersionParts};
+
+let version = Version::parse("1.2.3-alpha.1+build.7")?;
+let VersionParts {
+    major,
+    minor,
+    patch,
+    pre_release,
+    build,
+} = version.into_parts();
+```
+
+If code previously mutated fields directly, build a new `Version` from updated parts with `Version::new`.
+
 <a name="4.2.0"></a>
 ## 4.2.0 (2025-11-27)
 
