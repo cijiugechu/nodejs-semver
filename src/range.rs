@@ -33,7 +33,7 @@ fn no_valid_ranges_error(input: &str) -> SemverError {
 }
 
 fn should_skip_range_fallback(input: &str) -> bool {
-    let input = input.trim();
+    let input = trim_range_edges_if_needed(input);
     if starts_with_range_token(input) {
         return false;
     }
@@ -88,6 +88,57 @@ fn is_single_unparseable_token(input: &str) -> bool {
 
 fn is_range_token_separator(ch: u8) -> bool {
     matches!(ch, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
+}
+
+// Avoid `str::trim()` on the common ASCII non-whitespace path, but keep it for
+// non-ASCII edges so Unicode whitespace preserves the old behavior.
+fn trim_range_edges_if_needed(input: &str) -> &str {
+    let bytes = input.as_bytes();
+    let (Some(first), Some(last)) = (bytes.first(), bytes.last()) else {
+        return input;
+    };
+
+    if needs_trim_check(*first) || needs_trim_check(*last) {
+        trim_range_edges(input)
+    } else {
+        input
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn trim_range_edges(input: &str) -> &str {
+    input.trim()
+}
+
+fn needs_trim_check(ch: u8) -> bool {
+    ch <= b' ' || ch >= 0x80
+}
+
+// Empty `||` ranges are rare; only enter the split/trim check when the first
+// meaningful byte can actually start that form.
+fn is_empty_range(input: &str) -> bool {
+    let Some(first) = input.as_bytes().first().copied() else {
+        return true;
+    };
+
+    if first == b'|' {
+        return is_empty_or_range(input);
+    }
+
+    if needs_trim_check(first) {
+        let trimmed = trim_range_edges_if_needed(input);
+        return trimmed.is_empty()
+            || (trimmed.as_bytes().first() == Some(&b'|') && is_empty_or_range(input));
+    }
+
+    false
+}
+
+#[cold]
+#[inline(never)]
+fn is_empty_or_range(input: &str) -> bool {
+    input.split("||").all(|part| part.trim().is_empty())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -625,11 +676,7 @@ impl Range {
     pub fn parse<S: AsRef<str>>(input: S) -> Result<Self, SemverError> {
         let mut input = input.as_ref();
 
-        if input.trim().is_empty() {
-            return Ok(Self::any());
-        }
-
-        if input.split("||").all(|part| part.trim().is_empty()) {
+        if is_empty_range(input) {
             return Ok(Self::any());
         }
 
@@ -2374,6 +2421,20 @@ mod tests {
     use super::*;
 
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn detects_empty_ranges() {
+        assert!(is_empty_range(""));
+        assert!(is_empty_range("   "));
+        assert!(is_empty_range("\u{2003}"));
+        assert!(is_empty_range("||"));
+        assert!(is_empty_range(" || || "));
+
+        assert!(!is_empty_range("|"));
+        assert!(!is_empty_range("|||"));
+        assert!(!is_empty_range("1.2.3"));
+        assert!(!is_empty_range("1.2.3 || 2.0.0"));
+    }
 
     macro_rules! range_parse_tests {
         ($($name:ident => $vals:expr),+ ,$(,)?) => {
