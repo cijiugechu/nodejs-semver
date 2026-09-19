@@ -1,17 +1,39 @@
 # `nodejs-semver` Release Changelog
 
-## Unreleased
+<a name="6.0.0"></a>
+## 6.0.0 (2026-09-19)
 
-- Replace the loose parser fallback with dedicated handwritten parsing and remove
-  the `winnow`, `miette`, and `bytecount` dependencies. Preserve existing fast paths
-  and loose parsing behavior.
-- **Breaking (error diagnostics):** simplify `SemverError` to a lightweight error.
-  Remove `SemverErrorKind`, the `input`, `span`, `offset`, `location`, and `kind`
-  accessors, and the `miette::Diagnostic` implementation. Detailed error messages
-  are replaced by a fixed message. Parsing still returns `Result<_, SemverError>`;
-  `FromStr`, `Display`, and `std::error::Error` remain supported.
-- Fix a pre-existing stack overflow when the short range scanner mistook `|}`
-  for `||` and recursively parsed the same input.
+### Bug Fixes
+
+* **range:** fix a stack overflow when the short range scanner mistook `|}` for `||` and recursively parsed the same input ([8b0b01c](https://github.com/cijiugechu/nodejs-semver/commit/8b0b01c96809f77f936b276d5af835c6181a2bb9))
+
+### Performance
+
+* **range:** avoid unnecessary trimming and scans for empty ranges on common inputs, while preserving Unicode whitespace handling ([e89e11d](https://github.com/cijiugechu/nodejs-semver/commit/e89e11df6ec2a6629e08f8cda7ca8c8a30cab123))
+
+* **parser:** replace the parser-combinator fallback with dedicated handwritten parsing while preserving existing fast paths and loose parsing behavior; avoid allocating input strings for parse errors ([8b0b01c](https://github.com/cijiugechu/nodejs-semver/commit/8b0b01c96809f77f936b276d5af835c6181a2bb9))
+
+### Miscellaneous Tasks
+
+* **deps:** remove `winnow`, `miette`, and `bytecount` ([8b0b01c](https://github.com/cijiugechu/nodejs-semver/commit/8b0b01c96809f77f936b276d5af835c6181a2bb9))
+
+* **test:** add loose parsing compatibility fixtures and regression tests, and extend fuzzing to include Unicode and control characters ([8b0b01c](https://github.com/cijiugechu/nodejs-semver/commit/8b0b01c96809f77f936b276d5af835c6181a2bb9))
+
+* **bench:** expand coverage of version and range fallback parsing and invalid inputs ([8b0b01c](https://github.com/cijiugechu/nodejs-semver/commit/8b0b01c96809f77f936b276d5af835c6181a2bb9))
+
+### **BREAKING CHANGE**
+
+`SemverError` is now a lightweight error without detailed diagnostics ([8b0b01c](https://github.com/cijiugechu/nodejs-semver/commit/8b0b01c96809f77f936b276d5af835c6181a2bb9)).
+
+The following diagnostic APIs have been removed:
+
+* `SemverErrorKind`.
+* The `SemverError::input()`, `span()`, `offset()`, `location()`, and `kind()` accessors.
+* The `miette::Diagnostic` implementation.
+
+Detailed error messages are replaced by the fixed message `Invalid semantic version or range`. Callers that previously inspected error kinds or source locations should handle `SemverError` as a generic parse failure and retain the original input themselves if needed.
+
+`Version::parse` and `Range::parse` still return `Result<_, SemverError>`. `FromStr`, `Display`, and `std::error::Error` remain supported, so callers using `?`, `is_err()`, or standard error propagation can keep their existing handling.
 
 <a name="5.0.0"></a>
 ## 5.0.0 (2026-06-20)
