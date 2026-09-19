@@ -9,6 +9,16 @@ const VERSION_CASES: &[(&str, &str)] = &[
     ("prerelease_build", "1.2.3-rc.4+build.7"),
 ];
 
+const VERSION_FALLBACK_ATTEMPT_CASES: &[(&str, &str)] = &[
+    ("trailing_punctuation", "1.2.3!"),
+    ("incomplete_metadata", "1.2.3-a+"),
+    ("unicode_identifier", "1.2.3-Ł"),
+    ("incomplete_core", "1.2"),
+    ("invalid_core", "1.2.x"),
+    ("integer_overflow", "1.2.18446744073709551616"),
+    ("protocol", "workspace:*"),
+];
+
 const RANGE_CASES: &[(&str, &str)] = &[
     ("exact", "1.2.3"),
     ("comparator", ">=1.2.3-rc.4"),
@@ -31,6 +41,10 @@ const RANGE_FALLBACK_ATTEMPT_CASES: &[(&str, &str)] = &[
     ("bare_garbage", "foo"),
     ("workspace_protocol", "workspace:*"),
     ("npm_alias", "npm:react-dom@19.3.0-canary-b1786c31-20260618"),
+    ("spaced_comparator", "foo >= 1.2.3"),
+    ("garbage_prerelease", "foo 1.2.3-beta"),
+    ("unicode_identifier", "foo 1.2.3-Ł"),
+    ("hyphen_build", "1.2.3+lower - 2.3.4+upper"),
 ];
 
 const SATISFIES_CASES: &[(&str, &str, &str)] = &[
@@ -359,6 +373,18 @@ fn bench_range_parse(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_version_parse_fallback_attempt(c: &mut Criterion) {
+    let mut group = c.benchmark_group("version_parse_fallback_attempt");
+
+    for (name, input) in VERSION_FALLBACK_ATTEMPT_CASES {
+        group.bench_with_input(BenchmarkId::from_parameter(name), input, |b, input| {
+            b.iter(|| black_box(Version::parse(black_box(*input)).is_ok()));
+        });
+    }
+
+    group.finish();
+}
+
 fn bench_range_parse_fallback_attempt(c: &mut Criterion) {
     let mut group = c.benchmark_group("range_parse_fallback_attempt");
 
@@ -500,6 +526,7 @@ fn bench_package_manager_corpus(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_version_parse,
+    bench_version_parse_fallback_attempt,
     bench_range_parse,
     bench_range_parse_fallback_attempt,
     bench_satisfies,

@@ -1,0 +1,307 @@
+[
+  {
+    "input": "",
+    "range": "*",
+    "version": null
+  },
+  {
+    "input": "1.2.3!",
+    "range": null,
+    "version": "1.2.3"
+  },
+  {
+    "input": "1.2.3.4",
+    "range": null,
+    "version": "1.2.3"
+  },
+  {
+    "input": "1.2.3-",
+    "range": null,
+    "version": "1.2.3"
+  },
+  {
+    "input": "1.2.3+",
+    "range": null,
+    "version": "1.2.3"
+  },
+  {
+    "input": "1.2.3-a.",
+    "range": null,
+    "version": "1.2.3-a"
+  },
+  {
+    "input": "1.2.3-a..b",
+    "range": null,
+    "version": "1.2.3-a"
+  },
+  {
+    "input": "1.2.3-a+",
+    "range": null,
+    "version": "1.2.3-a"
+  },
+  {
+    "input": "1.2.3-a+b.",
+    "range": null,
+    "version": "1.2.3-a+b"
+  },
+  {
+    "input": "1.2.3+a..b",
+    "range": null,
+    "version": "1.2.3+a"
+  },
+  {
+    "input": "1.2.3beta",
+    "range": "1.2.3-beta",
+    "version": "1.2.3-beta"
+  },
+  {
+    "input": "1.2.3-01+0002",
+    "range": "1.2.3-1+2",
+    "version": "1.2.3-1+2"
+  },
+  {
+    "input": "1.2.3-18446744073709551616+18446744073709551616",
+    "range": "1.2.3-18446744073709551616+18446744073709551616",
+    "version": "1.2.3-18446744073709551616+18446744073709551616"
+  },
+  {
+    "input": "1.2.3-Ł",
+    "range": "1.2.3-Ł",
+    "version": "1.2.3-Ł"
+  },
+  {
+    "input": "1.2.3+İ",
+    "range": "1.2.3+İ",
+    "version": "1.2.3+İ"
+  },
+  {
+    "input": "1.2.3-中",
+    "range": null,
+    "version": "1.2.3"
+  },
+  {
+    "input": "1.2.3-aŁ",
+    "range": "1.2.3-aŁ",
+    "version": "1.2.3-a"
+  },
+  {
+    "input": "v\t1.2.3",
+    "range": "1.2.3",
+    "version": "1.2.3"
+  },
+  {
+    "input": "V 1.2.3",
+    "range": "1.2.3",
+    "version": "1.2.3"
+  },
+  {
+    "input": "\n1.2.3",
+    "range": "1.2.3",
+    "version": "1.2.3"
+  },
+  {
+    "input": "\n1.2.3!",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "1.2.3\nfoo",
+    "range": "1.2.3",
+    "version": "1.2.3"
+  },
+  {
+    "input": "foo >= 1.2.3",
+    "range": ">=1.2.3",
+    "version": null
+  },
+  {
+    "input": "foo 1.2.3-beta",
+    "range": "1.2.3-beta",
+    "version": null
+  },
+  {
+    "input": "foo\t1.2.3+build",
+    "range": "1.2.3+build",
+    "version": null
+  },
+  {
+    "input": "foo\n1.2.3-beta",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "foo 1.2.3-beta",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "1.2.3 ||",
+    "range": "1.2.3",
+    "version": "1.2.3"
+  },
+  {
+    "input": "|| 1.2.3",
+    "range": "1.2.3",
+    "version": null
+  },
+  {
+    "input": "1.2.3 || || 2.3.4",
+    "range": "1.2.3||2.3.4",
+    "version": "1.2.3"
+  },
+  {
+    "input": "1.2.3 | 2.3.4",
+    "range": "1.2.3||2.3.4",
+    "version": "1.2.3"
+  },
+  {
+    "input": "~1.y 1.2.3",
+    "range": "1.2.3",
+    "version": null
+  },
+  {
+    "input": "1.2.3 ~1.y",
+    "range": "1.2.3",
+    "version": "1.2.3"
+  },
+  {
+    "input": "1.2.x-a",
+    "range": ">=1.2.0 <1.3.0-0",
+    "version": null
+  },
+  {
+    "input": "1.x.*-a",
+    "range": ">=1.0.0 <2.0.0-0",
+    "version": null
+  },
+  {
+    "input": ">= 1.2.3+build",
+    "range": ">=1.2.3+build",
+    "version": null
+  },
+  {
+    "input": "<= 1.2",
+    "range": "<=1.2.900719925474099",
+    "version": null
+  },
+  {
+    "input": "> 1.2",
+    "range": ">=1.3.0",
+    "version": null
+  },
+  {
+    "input": "< 1.2",
+    "range": "<1.2.0-0",
+    "version": null
+  },
+  {
+    "input": "= 1.2.3+build",
+    "range": "1.2.3",
+    "version": null
+  },
+  {
+    "input": "~ > 1.2.3+build",
+    "range": ">=1.2.3 <1.3.0-0",
+    "version": null
+  },
+  {
+    "input": "^ 0.0.1-alpha+build",
+    "range": ">=0.0.1-alpha <0.0.2-0",
+    "version": null
+  },
+  {
+    "input": "^ 1.2 ^ 1",
+    "range": ">=1.2.0 <2.0.0-0",
+    "version": null
+  },
+  {
+    "input": "foo >= 2 < 1",
+    "range": ">=2.0.0||<1.0.0",
+    "version": null
+  },
+  {
+    "input": "1.2.3+lower - 2.3.4+upper",
+    "range": ">=1.2.3+lower <=2.3.4+upper",
+    "version": "1.2.3+lower"
+  },
+  {
+    "input": " - 2.3.4",
+    "range": "<=2.3.4",
+    "version": null
+  },
+  {
+    "input": "foo - 2.3.4",
+    "range": "2.3.4",
+    "version": null
+  },
+  {
+    "input": "1.2.3 - *",
+    "range": null,
+    "version": "1.2.3"
+  },
+  {
+    "input": "~* || 1.2.3",
+    "range": "1.2.3",
+    "version": null
+  },
+  {
+    "input": "foo",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "workspace:*",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "npm:react-dom@19.3.0",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "1.2",
+    "range": ">=1.2.0 <1.3.0-0",
+    "version": null
+  },
+  {
+    "input": "1.2.x",
+    "range": ">=1.2.0 <1.3.0-0",
+    "version": null
+  },
+  {
+    "input": "900719925474099.0.0!",
+    "range": null,
+    "version": "900719925474099.0.0"
+  },
+  {
+    "input": "900719925474100.0.0",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "18446744073709551616.0.0",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "1.2.18446744073709551616",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "1.2.900719925474100",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "1.18446744073709551616.2",
+    "range": null,
+    "version": null
+  },
+  {
+    "input": "1.2.3-\u0000",
+    "range": null,
+    "version": "1.2.3"
+  }
+]

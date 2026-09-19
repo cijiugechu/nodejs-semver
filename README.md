@@ -27,6 +27,10 @@ let range: Range = "^1.2".parse().unwrap();
 assert!(version.satisfies(&range));
 ```
 
+Parsing returns `Result<_, SemverError>`. The error implements
+`std::error::Error` and `Display`, but does not retain the input or provide
+error kinds, source locations, or diagnostic labels.
+
 ## Optional Features
 
 The following are a list of [Cargo features](https://doc.rust-lang.org/stable/cargo/reference/features.html#the-features-section) that can be enabled:

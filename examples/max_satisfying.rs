@@ -1,7 +1,7 @@
 use nodejs_semver::{Range, Version};
 
 fn main() {
-    let versions: Vec<_> = vec!["1.2.3", "1.2.4", "1.2.5", "1.2.6"]
+    let versions: Vec<_> = ["1.2.3", "1.2.4", "1.2.5", "1.2.6"]
         .iter()
         .map(|s| Version::parse(s).unwrap())
         .collect();

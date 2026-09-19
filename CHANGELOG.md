@@ -1,5 +1,18 @@
 # `nodejs-semver` Release Changelog
 
+## Unreleased
+
+- Replace the loose parser fallback with dedicated handwritten parsing and remove
+  the `winnow`, `miette`, and `bytecount` dependencies. Preserve existing fast paths
+  and loose parsing behavior.
+- **Breaking (error diagnostics):** simplify `SemverError` to a lightweight error.
+  Remove `SemverErrorKind`, the `input`, `span`, `offset`, `location`, and `kind`
+  accessors, and the `miette::Diagnostic` implementation. Detailed error messages
+  are replaced by a fixed message. Parsing still returns `Result<_, SemverError>`;
+  `FromStr`, `Display`, and `std::error::Error` remain supported.
+- Fix a pre-existing stack overflow when the short range scanner mistook `|}`
+  for `||` and recursively parsed the same input.
+
 <a name="5.0.0"></a>
 ## 5.0.0 (2026-06-20)
 

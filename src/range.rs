@@ -3,34 +3,15 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 
-use winnow::ascii::{space0, space1};
-use winnow::combinator::{
-    alt, delimited, eof, opt, peek, preceded, repeat_till, separated, terminated,
-};
-use winnow::token::{any, literal};
-use winnow::{ModalResult, Parser};
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
 use smallvec::SmallVec;
 use thiserror::Error;
 
-use crate::{
-    Identifier, MAX_SAFE_INTEGER, SemverError, SemverErrorKind, SemverParseError, Version, extras,
-    number, semver_error_from_parse,
-};
+use crate::{Identifier, SemverError, Version};
 
 mod fast;
-
-#[cold]
-#[inline(never)]
-fn no_valid_ranges_error(input: &str) -> SemverError {
-    SemverError {
-        input: input.into(),
-        span: (input.len(), 0).into(),
-        kind: SemverErrorKind::NoValidRanges,
-    }
-}
+mod loose;
 
 fn should_skip_range_fallback(input: &str) -> bool {
     let input = trim_range_edges_if_needed(input);
@@ -674,7 +655,7 @@ impl Range {
     Parse a range from a string.
     */
     pub fn parse<S: AsRef<str>>(input: S) -> Result<Self, SemverError> {
-        let mut input = input.as_ref();
+        let input = input.as_ref();
 
         if is_empty_range(input) {
             return Ok(Self::any());
@@ -685,17 +666,14 @@ impl Range {
         }
 
         if should_skip_range_fallback(input) {
-            return Err(no_valid_ranges_error(input));
+            return Err(SemverError);
         }
 
         if let Some(range) = fast::parse_garbage(input) {
             return Ok(range);
         }
 
-        match range_set.parse_next(&mut input) {
-            Ok(range) => Ok(range),
-            Err(err) => Err(semver_error_from_parse(input, err)),
-        }
+        loose::parse(input).ok_or(SemverError)
     }
 
     /**
@@ -979,528 +957,6 @@ impl std::str::FromStr for Range {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Range::parse(s)
     }
-}
-
-// ---- Parser ----
-
-/*
-Grammar from https://github.com/npm/node-semver#range-grammar
-
-range-set  ::= range ( logical-or range ) *
-logical-or ::= ( ' ' ) * '||' ( ' ' ) *
-range      ::= hyphen | simple ( ' ' simple ) * | ''
-hyphen     ::= partial ' - ' partial
-simple     ::= primitive | partial | tilde | caret
-primitive  ::= ( '<' | '>' | '>=' | '<=' | '=' ) partial
-partial    ::= xr ( '.' xr ( '.' xr qualifier ? )? )?
-xr         ::= 'x' | 'X' | '*' | nr
-nr         ::= '0' | ['1'-'9'] ( ['0'-'9'] ) *
-tilde      ::= '~' partial
-caret      ::= '^' partial
-qualifier  ::= ( '-' pre )? ( '+' build )?
-pre        ::= parts
-build      ::= parts
-parts      ::= part ( '.' part ) *
-part       ::= nr | [-0-9A-Za-z]+
-
-
-Loose mode (all LHS are invalid in strict mode):
-* 01.02.03 -> 1.2.3
-* 1.2.3alpha -> 1.2.3-alpha
-* v 1.2.3 -> 1.2.3 (v1.2.3 is actually a valid "plain" version)
-* =1.2.3 -> 1.2.3 (already a valid range)
-* - 10 -> >=10.0.0 <11.0.0
-* 1.2.3 foo 4.5.6 -> 1.2.3 4.5.6
-* 1.2.3.4 -> invalid range
-* foo -> invalid range
-* 1.2beta4 -> invalid range
-
-TODO: add tests for all these
-*/
-
-// range-set ::= range ( logical-or range ) *
-fn range_set<'s>(input: &mut &'s str) -> ModalResult<Range, SemverParseError<&'s str>> {
-    Parser::try_map(bound_sets, |sets| {
-        if sets.is_empty() {
-            Err(SemverParseError {
-                input,
-                kind: Some(SemverErrorKind::NoValidRanges),
-                context: None,
-            })
-        } else {
-            Ok(Range::from_bound_sets(sets).expect("non-empty bound sets"))
-        }
-    })
-    .parse_next(input)
-}
-
-// logical-or ::= ( ' ' ) * '||' ( ' ' ) *
-fn bound_sets<'s>(input: &mut &'s str) -> ModalResult<Vec<BoundSet>, SemverParseError<&'s str>> {
-    Parser::map(
-        separated(0.., range, logical_or),
-        |sets: Vec<Vec<BoundSet>>| sets.into_iter().flatten().collect(),
-    )
-    .parse_next(input)
-}
-fn logical_or<'s>(input: &mut &'s str) -> ModalResult<(), SemverParseError<&'s str>> {
-    Parser::map(delimited(space0, literal("||"), space0), |_| ()).parse_next(input)
-}
-
-fn range<'s>(input: &mut &'s str) -> ModalResult<Vec<BoundSet>, SemverParseError<&'s str>> {
-    // TODO: loose parsing means that `1.2.3 foo` translates to `1.2.3`, so we
-    // need to do some stuff here to filter out unwanted BoundSets.
-    Parser::map(
-        separated(0.., simple, space1),
-        |bs: Vec<Option<BoundSet>>| {
-            bs.into_iter()
-                .flatten()
-                .fold(Vec::new(), |mut acc: Vec<BoundSet>, bs| {
-                    if let Some(last) = acc.pop() {
-                        if let Some(bound) = last.intersect(&bs) {
-                            acc.push(bound);
-                        } else {
-                            acc.push(last);
-                            acc.push(bs);
-                        }
-                    } else {
-                        acc.push(bs)
-                    }
-                    acc
-                })
-        },
-    )
-    .parse_next(input)
-}
-
-// simple ::= primitive | partial | tilde | caret | garbage
-fn simple<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseError<&'s str>> {
-    alt((
-        terminated(hyphen, peek(alt((space1, literal("||"), eof)))),
-        terminated(primitive, peek(alt((space1, literal("||"), eof)))),
-        terminated(partial, peek(alt((space1, literal("||"), eof)))),
-        terminated(tilde, peek(alt((space1, literal("||"), eof)))),
-        terminated(caret, peek(alt((space1, literal("||"), eof)))),
-        garbage,
-    ))
-    .parse_next(input)
-}
-
-fn garbage<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseError<&'s str>> {
-    Parser::map(
-        repeat_till(0.., any, alt((peek(space1), peek(literal("||")), eof))),
-        |_: ((), &str)| None,
-    )
-    .parse_next(input)
-}
-
-// primitive  ::= ( '<' | '>' | '>=' | '<=' | '=' ) partial
-fn primitive<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseError<&'s str>> {
-    use Operation::*;
-
-    Parser::map(
-        (operation, preceded(space0, partial_version)),
-        |parsed| match parsed {
-            (GreaterThanEquals, partial) => {
-                BoundSet::at_least(Predicate::Including(partial.into()))
-            }
-            (
-                GreaterThan,
-                Partial {
-                    major: Some(major),
-                    minor: Some(minor),
-                    patch: None,
-                    ..
-                },
-            ) => BoundSet::at_least(Predicate::Including((major, minor + 1, 0).into())),
-            (
-                GreaterThan,
-                Partial {
-                    major: Some(major),
-                    minor: None,
-                    patch: None,
-                    ..
-                },
-            ) => BoundSet::at_least(Predicate::Including((major + 1, 0, 0).into())),
-            (GreaterThan, partial) => BoundSet::at_least(Predicate::Excluding(partial.into())),
-            (
-                LessThan,
-                Partial {
-                    major: Some(major),
-                    minor: Some(minor),
-                    patch: None,
-                    ..
-                },
-            ) => BoundSet::at_most(Predicate::Excluding((major, minor, 0, 0).into())),
-            (
-                LessThan,
-                Partial {
-                    major,
-                    minor,
-                    patch,
-                    pre_release,
-                    build,
-                    ..
-                },
-            ) => BoundSet::at_most(Predicate::Excluding(Version::new(
-                major.unwrap_or(0),
-                minor.unwrap_or(0),
-                patch.unwrap_or(0),
-                pre_release,
-                build,
-            ))),
-            (
-                LessThanEquals,
-                Partial {
-                    major,
-                    minor: None,
-                    patch: None,
-                    ..
-                },
-            ) => BoundSet::at_most(Predicate::Including(
-                (major.unwrap_or(0), MAX_SAFE_INTEGER, MAX_SAFE_INTEGER).into(),
-            )),
-            (
-                LessThanEquals,
-                Partial {
-                    major,
-                    minor,
-                    patch: None,
-                    ..
-                },
-            ) => BoundSet::at_most(Predicate::Including(
-                (major.unwrap_or(0), minor.unwrap_or(0), MAX_SAFE_INTEGER).into(),
-            )),
-            (LessThanEquals, partial) => BoundSet::at_most(Predicate::Including(partial.into())),
-            (
-                Exact,
-                Partial {
-                    major: Some(major),
-                    minor: Some(minor),
-                    patch: Some(patch),
-                    pre_release,
-                    ..
-                },
-            ) => BoundSet::exact(Version::new(major, minor, patch, pre_release, vec![])),
-            (
-                Exact,
-                Partial {
-                    major: Some(major),
-                    minor: Some(minor),
-                    ..
-                },
-            ) => BoundSet::new(
-                Bound::Lower(Predicate::Including((major, minor, 0).into())),
-                Bound::Upper(Predicate::Excluding((major, minor + 1, 0, 0).into())),
-            ),
-            (
-                Exact,
-                Partial {
-                    major: Some(major), ..
-                },
-            ) => BoundSet::new(
-                Bound::Lower(Predicate::Including((major, 0, 0).into())),
-                Bound::Upper(Predicate::Excluding((major + 1, 0, 0, 0).into())),
-            ),
-            _ => None,
-        },
-    )
-    .context("operation range (ex: >= 1.2.3)")
-    .parse_next(input)
-}
-
-fn operation<'s>(input: &mut &'s str) -> ModalResult<Operation, SemverParseError<&'s str>> {
-    use Operation::*;
-    alt((
-        Parser::map(literal(">="), |_| GreaterThanEquals),
-        Parser::map(literal(">"), |_| GreaterThan),
-        Parser::map(literal("="), |_| Exact),
-        Parser::map(literal("<="), |_| LessThanEquals),
-        Parser::map(literal("<"), |_| LessThan),
-    ))
-    .parse_next(input)
-}
-
-fn partial<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseError<&'s str>> {
-    Parser::map(partial_version, |partial| match partial {
-        Partial { major: None, .. } => BoundSet::at_least(Predicate::Including((0, 0, 0).into())),
-        Partial {
-            major: Some(major),
-            minor: None,
-            ..
-        } => BoundSet::new(
-            Bound::Lower(Predicate::Including((major, 0, 0).into())),
-            Bound::Upper(Predicate::Excluding((major + 1, 0, 0, 0).into())),
-        ),
-        Partial {
-            major: Some(major),
-            minor: Some(minor),
-            patch: None,
-            ..
-        } => BoundSet::new(
-            Bound::Lower(Predicate::Including((major, minor, 0).into())),
-            Bound::Upper(Predicate::Excluding((major, minor + 1, 0, 0).into())),
-        ),
-        partial => BoundSet::exact(partial.into()),
-    })
-    .context("plain version range (ex: 1.2)")
-    .parse_next(input)
-}
-
-#[derive(Debug, Clone)]
-struct Partial {
-    major: Option<u64>,
-    minor: Option<u64>,
-    patch: Option<u64>,
-    pre_release: Vec<Identifier>,
-    build: Vec<Identifier>,
-}
-
-impl From<Partial> for Version {
-    fn from(partial: Partial) -> Self {
-        Version::new(
-            partial.major.unwrap_or(0),
-            partial.minor.unwrap_or(0),
-            partial.patch.unwrap_or(0),
-            partial.pre_release,
-            partial.build,
-        )
-    }
-}
-
-// partial ::= xr ( '.' xr ( '.' xr qualifier ? )? )?
-// xr      ::= 'x' | 'X' | '*' | nr
-// nr      ::= '0' | ['1'-'9'] ( ['0'-'9'] ) *
-// NOTE: Loose mode means nr is actually just `['0'-'9']`.
-fn partial_version<'s>(input: &mut &'s str) -> ModalResult<Partial, SemverParseError<&'s str>> {
-    let _ = opt(literal("v")).parse_next(input)?;
-    let _ = space0(input)?;
-    let major = component(input)?;
-    let minor = opt(preceded(literal("."), component)).parse_next(input)?;
-    let patch = opt(preceded(literal("."), component)).parse_next(input)?;
-    let (pre, build) = if patch.is_some() {
-        extras(input)?
-    } else {
-        (vec![], vec![])
-    };
-    Ok(Partial {
-        major,
-        minor: minor.flatten(),
-        patch: patch.flatten(),
-        pre_release: pre,
-        build,
-    })
-}
-
-fn component<'s>(input: &mut &'s str) -> ModalResult<Option<u64>, SemverParseError<&'s str>> {
-    alt((
-        Parser::map(x_or_asterisk, |_| None),
-        Parser::map(number, Some),
-    ))
-    .parse_next(input)
-}
-
-fn x_or_asterisk<'s>(input: &mut &'s str) -> ModalResult<(), SemverParseError<&'s str>> {
-    Parser::map(alt((literal("x"), literal("X"), literal("*"))), |_| ()).parse_next(input)
-}
-
-fn tilde_gt<'s>(input: &mut &'s str) -> ModalResult<Option<&'s str>, SemverParseError<&'s str>> {
-    Parser::map(
-        (literal("~"), space0, opt(literal(">")), space0),
-        |(_, _, gt, _)| gt,
-    )
-    .parse_next(input)
-}
-
-fn tilde<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseError<&'s str>> {
-    Parser::map((tilde_gt, partial_version), |parsed| match parsed {
-        (
-            Some(_gt),
-            Partial {
-                major: Some(major),
-                minor: None,
-                patch: None,
-                ..
-            },
-        ) => BoundSet::new(
-            Bound::Lower(Predicate::Including((major, 0, 0).into())),
-            Bound::Upper(Predicate::Excluding((major + 1, 0, 0, 0).into())),
-        ),
-        (
-            Some(_gt),
-            Partial {
-                major: Some(major),
-                minor: Some(minor),
-                patch,
-                pre_release,
-                ..
-            },
-        ) => BoundSet::new(
-            Bound::Lower(Predicate::Including(Version::new(
-                major,
-                minor,
-                patch.unwrap_or(0),
-                pre_release,
-                vec![],
-            ))),
-            Bound::Upper(Predicate::Excluding((major, minor + 1, 0, 0).into())),
-        ),
-        (
-            None,
-            Partial {
-                major: Some(major),
-                minor: Some(minor),
-                patch: Some(patch),
-                pre_release,
-                ..
-            },
-        ) => BoundSet::new(
-            Bound::Lower(Predicate::Including(Version::new(
-                major,
-                minor,
-                patch,
-                pre_release,
-                vec![],
-            ))),
-            Bound::Upper(Predicate::Excluding((major, minor + 1, 0, 0).into())),
-        ),
-        (
-            None,
-            Partial {
-                major: Some(major),
-                minor: Some(minor),
-                patch: None,
-                ..
-            },
-        ) => BoundSet::new(
-            Bound::Lower(Predicate::Including((major, minor, 0).into())),
-            Bound::Upper(Predicate::Excluding((major, minor + 1, 0, 0).into())),
-        ),
-        (
-            None,
-            Partial {
-                major: Some(major),
-                minor: None,
-                patch: None,
-                ..
-            },
-        ) => BoundSet::new(
-            Bound::Lower(Predicate::Including((major, 0, 0).into())),
-            Bound::Upper(Predicate::Excluding((major + 1, 0, 0, 0).into())),
-        ),
-        _ => None,
-    })
-    .context("tilde version range (ex: ~1.2.3)")
-    .parse_next(input)
-}
-
-fn caret<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseError<&'s str>> {
-    Parser::map(
-        preceded((literal("^"), space0), partial_version),
-        |parsed| match parsed {
-            Partial {
-                major: Some(0),
-                minor: None,
-                patch: None,
-                ..
-            } => BoundSet::at_most(Predicate::Excluding((1, 0, 0, 0).into())),
-            Partial {
-                major: Some(0),
-                minor: Some(minor),
-                patch: None,
-                ..
-            } => BoundSet::new(
-                Bound::Lower(Predicate::Including((0, minor, 0).into())),
-                Bound::Upper(Predicate::Excluding((0, minor + 1, 0, 0).into())),
-            ),
-            // TODO: can be compressed?
-            Partial {
-                major: Some(major),
-                minor: None,
-                patch: None,
-                ..
-            } => BoundSet::new(
-                Bound::Lower(Predicate::Including((major, 0, 0).into())),
-                Bound::Upper(Predicate::Excluding((major + 1, 0, 0, 0).into())),
-            ),
-            Partial {
-                major: Some(major),
-                minor: Some(minor),
-                patch: None,
-                ..
-            } => BoundSet::new(
-                Bound::Lower(Predicate::Including((major, minor, 0).into())),
-                Bound::Upper(Predicate::Excluding((major + 1, 0, 0, 0).into())),
-            ),
-            Partial {
-                major: Some(major),
-                minor: Some(minor),
-                patch: Some(patch),
-                pre_release,
-                ..
-            } => BoundSet::new(
-                Bound::Lower(Predicate::Including(Version::new(
-                    major,
-                    minor,
-                    patch,
-                    pre_release,
-                    vec![],
-                ))),
-                Bound::Upper(Predicate::Excluding(match (major, minor, patch) {
-                    (0, 0, n) => Version::from((0, 0, n + 1, 0)),
-                    (0, n, _) => Version::from((0, n + 1, 0, 0)),
-                    (n, _, _) => Version::from((n + 1, 0, 0, 0)),
-                })),
-            ),
-            _ => None,
-        },
-    )
-    .context("caret version range (ex: ^1.2.3)")
-    .parse_next(input)
-}
-
-// hyphen ::= ' - ' partial /* loose */ | partial ' - ' partial
-fn hyphen<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseError<&'s str>> {
-    fn parser<'s>(input: &mut &'s str) -> ModalResult<Option<BoundSet>, SemverParseError<&'s str>> {
-        let lower = opt(partial_version).parse_next(input)?;
-        let _ = space1(input)?;
-        let _ = literal("-").parse_next(input)?;
-        let _ = space1(input)?;
-        let upper = partial_version(input)?;
-        let upper = match upper {
-            Partial {
-                major: None,
-                minor: None,
-                patch: None,
-                ..
-            } => Predicate::Excluding((0, 0, 0, 0).into()),
-            Partial {
-                major: Some(major),
-                minor: None,
-                patch: None,
-                ..
-            } => Predicate::Excluding((major + 1, 0, 0, 0).into()),
-            Partial {
-                major: Some(major),
-                minor: Some(minor),
-                patch: None,
-                ..
-            } => Predicate::Excluding((major, minor + 1, 0, 0).into()),
-            partial => Predicate::Including(partial.into()),
-        };
-        let bounds = if let Some(lower) = lower {
-            BoundSet::new(
-                Bound::Lower(Predicate::Including(lower.into())),
-                Bound::Upper(upper),
-            )
-        } else {
-            BoundSet::at_most(upper)
-        };
-        Ok(bounds)
-    }
-
-    parser
-        .context("hyphenated version range (ex: 1.2 - 2)")
-        .parse_next(input)
 }
 
 macro_rules! create_tests_for {
@@ -2539,10 +1995,7 @@ mod tests {
             "workspace:*",
             "npm:react-dom@19.3.0-canary-b1786c31-20260618",
         ] {
-            assert_eq!(
-                Range::parse(input).unwrap_err().kind(),
-                &SemverErrorKind::NoValidRanges
-            );
+            assert!(Range::parse(input).is_err());
         }
 
         assert_eq!(Range::parse("foo 1.2.3").unwrap().to_string(), "1.2.3");
@@ -2623,7 +2076,7 @@ mod max_satisfying {
     #[test]
     fn test_max_satisfying_none() {
         let range = Range::parse(">=1.0.0 <2.0.0").unwrap();
-        let versions: Vec<_> = vec!["2.0.0", "0.1.0"]
+        let versions: Vec<_> = ["2.0.0", "0.1.0"]
             .iter()
             .map(|s| Version::parse(s).unwrap())
             .collect();
@@ -2684,7 +2137,7 @@ mod min_satisfying {
     #[test]
     fn test_min_satisfying_none() {
         let range = Range::parse(">=1.0.0 <2.0.0").unwrap();
-        let versions: Vec<_> = vec!["2.0.0", "0.1.0"]
+        let versions: Vec<_> = ["2.0.0", "0.1.0"]
             .iter()
             .map(|s| Version::parse(s).unwrap())
             .collect();

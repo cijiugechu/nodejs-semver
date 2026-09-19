@@ -37,7 +37,11 @@ impl ShortWord {
             return false;
         }
 
-        let byte_matches = self.matching_byte_lanes(needle);
+        // The subtraction-based zero test can borrow into an adjacent lane
+        // whose XOR value is 1. Those flags are harmless for an existence test,
+        // but must be cleared before checking the positions of two matches.
+        let xor = self.word ^ repeated_byte(needle);
+        let byte_matches = self.matching_byte_lanes(needle) & !(xor << 7);
         let valid_pair_starts = active_byte_mask(self.len - 1);
 
         (byte_matches & (byte_matches >> 8) & valid_pair_starts) != 0
@@ -825,6 +829,31 @@ mod tests {
         assert!(!contains_or_fast("^1 | ^2"));
         assert!(!contains_or_fast("|"));
         assert!(!contains_or_fast(""));
+    }
+
+    #[test]
+    fn short_or_search_rejects_near_matches() {
+        // A false positive would recursively parse the same unsplit input.
+        assert!(!contains_or_fast("^|}"));
+        for len in 2..=SHORT_SCAN_MAX {
+            for start in 0..len - 1 {
+                for pair in [*b"|}", *b"}|", *b"||", *b"{{"] {
+                    let mut bytes = vec![b'a'; len];
+                    bytes[start..start + 2].copy_from_slice(&pair);
+                    let input = std::str::from_utf8(&bytes).unwrap();
+                    assert_eq!(contains_or_fast(input), input.contains("||"), "{input:?}");
+                }
+            }
+        }
+        for first in u8::MIN..=u8::MAX {
+            for second in u8::MIN..=u8::MAX {
+                let pair = [first, second];
+                assert_eq!(
+                    ShortWord::new(&pair).unwrap().contains_repeated_pair(b'|'),
+                    pair == *b"||",
+                );
+            }
+        }
     }
 
     #[test]
