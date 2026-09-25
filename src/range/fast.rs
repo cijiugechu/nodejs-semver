@@ -1,99 +1,6 @@
 use super::{Bound, BoundSet, Operation, Predicate, Range};
-use crate::{Identifier, Identifiers, MAX_SAFE_INTEGER, Version};
-
-const SHORT_SCAN_MAX: usize = 16;
-const BYTE_LANE_LOW_BITS: u128 = 0x0101_0101_0101_0101_0101_0101_0101_0101;
-const BYTE_LANE_HIGH_BITS: u128 = 0x8080_8080_8080_8080_8080_8080_8080_8080;
-
-#[derive(Clone, Copy)]
-struct ShortWord {
-    word: u128,
-    len: usize,
-}
-
-impl ShortWord {
-    #[inline(always)]
-    fn new(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() > SHORT_SCAN_MAX {
-            return None;
-        }
-
-        let mut padded = [0; SHORT_SCAN_MAX];
-        padded[..bytes.len()].copy_from_slice(bytes);
-        Some(Self {
-            word: u128::from_le_bytes(padded),
-            len: bytes.len(),
-        })
-    }
-
-    #[inline(always)]
-    fn contains_byte(self, needle: u8) -> bool {
-        self.matching_byte_lanes(needle) & active_byte_mask(self.len) != 0
-    }
-
-    #[inline(always)]
-    fn contains_repeated_pair(self, needle: u8) -> bool {
-        if self.len < 2 {
-            return false;
-        }
-
-        // The subtraction-based zero test can borrow into an adjacent lane
-        // whose XOR value is 1. Those flags are harmless for an existence test,
-        // but must be cleared before checking the positions of two matches.
-        let xor = self.word ^ repeated_byte(needle);
-        let byte_matches = self.matching_byte_lanes(needle) & !(xor << 7);
-        let valid_pair_starts = active_byte_mask(self.len - 1);
-
-        (byte_matches & (byte_matches >> 8) & valid_pair_starts) != 0
-    }
-
-    #[inline(always)]
-    fn matching_byte_lanes(self, needle: u8) -> u128 {
-        matching_byte_lanes(self.word, needle)
-    }
-}
-
-#[inline(always)]
-fn contains_byte_fast(bytes: &[u8], needle: u8) -> bool {
-    if let Some(word) = ShortWord::new(bytes) {
-        return word.contains_byte(needle);
-    }
-
-    bytes.contains(&needle)
-}
-
-#[inline(always)]
-fn contains_or_fast(input: &str) -> bool {
-    let bytes = input.as_bytes();
-    if let Some(word) = ShortWord::new(bytes) {
-        return word.contains_repeated_pair(b'|');
-    }
-
-    input.contains("||")
-}
-
-#[inline(always)]
-fn active_byte_mask(len: usize) -> u128 {
-    if len >= SHORT_SCAN_MAX {
-        u128::MAX
-    } else if len == 0 {
-        0
-    } else {
-        (1u128 << (len * 8)) - 1
-    }
-}
-
-#[inline(always)]
-fn repeated_byte(byte: u8) -> u128 {
-    u128::from_le_bytes([byte; SHORT_SCAN_MAX])
-}
-
-#[inline(always)]
-fn matching_byte_lanes(word: u128, needle: u8) -> u128 {
-    // XOR turns matching bytes into zero bytes; this sets the high bit in each zero byte lane.
-    let zero_bytes = word ^ repeated_byte(needle);
-    zero_bytes.wrapping_sub(BYTE_LANE_LOW_BITS) & !zero_bytes & BYTE_LANE_HIGH_BITS
-}
+use crate::scan::{self, identifiers, number, skip_whitespace};
+use crate::{Identifiers, MAX_SAFE_INTEGER, Version};
 
 pub(super) fn parse(input: &str) -> Option<Range> {
     let bytes = input.as_bytes();
@@ -108,8 +15,7 @@ pub(super) fn parse(input: &str) -> Option<Range> {
     }
 
     if matches!(first, Some(b'>' | b'<' | b'=')) {
-        return parse_comparator_set(input, contains_byte_fast(bytes, b'+'))
-            .or_else(|| parse_or_if_present(input));
+        return parse_comparator_set(input).or_else(|| parse_or_if_present(input));
     }
 
     if let Some(range) = parse_exact_version(bytes)
@@ -123,8 +29,8 @@ pub(super) fn parse(input: &str) -> Option<Range> {
     }
 
     if matches!(first, Some(b'v' | b'V' | b'0'..=b'9')) {
-        if contains_byte_fast(bytes, b'-') {
-            if let Some(range) = parse_hyphen(input, contains_byte_fast(bytes, b'+')) {
+        if bytes.contains(&b'-') {
+            if let Some(range) = parse_hyphen(input) {
                 return Some(range);
             }
         }
@@ -135,72 +41,17 @@ pub(super) fn parse(input: &str) -> Option<Range> {
     None
 }
 
-pub(super) fn parse_garbage(input: &str) -> Option<Range> {
-    if !input.bytes().any(is_space_byte) {
-        return None;
-    }
-
-    let mut sets = Vec::new();
-
-    for part in input.split("||") {
-        let mut current: Option<BoundSet> = None;
-
-        for token in part.split_whitespace() {
-            if token_requires_fallback(token) {
-                return None;
-            }
-
-            let Some(bound_set) = parse_single_token(token) else {
-                continue;
-            };
-
-            current = Some(if let Some(current) = current {
-                if let Some(bound) = current.intersect(&bound_set) {
-                    bound
-                } else {
-                    sets.push(current);
-                    bound_set
-                }
-            } else {
-                bound_set
-            });
-        }
-
-        if let Some(bound_set) = current {
-            sets.push(bound_set);
-        }
-    }
-
-    Range::from_bound_sets(sets)
-}
-
-fn parse_single_token(token: &str) -> Option<BoundSet> {
-    let mut bound_sets = Vec::new();
-    parse(token)?.append_bound_sets_to(&mut bound_sets);
-
-    if bound_sets.len() == 1 {
-        bound_sets.pop()
-    } else {
-        None
-    }
-}
-
-fn token_requires_fallback(token: &str) -> bool {
-    matches!(
-        token,
-        "-" | ">" | ">=" | "<" | "<=" | "=" | "^" | "~" | "~>"
-    ) || token.bytes().any(|ch| matches!(ch, b'-' | b'+'))
-}
-
 fn parse_or_if_present(input: &str) -> Option<Range> {
-    contains_or_fast(input).then(|| parse_or(input)).flatten()
+    (input.as_bytes().contains(&b'|') && input.contains("||"))
+        .then(|| parse_or(input))
+        .flatten()
 }
 
 fn parse_or(input: &str) -> Option<Range> {
     let mut sets = Vec::new();
 
     for part in input.split("||") {
-        let part = part.trim();
+        let part = scan::trim(part);
         if part.is_empty() {
             return None;
         }
@@ -211,22 +62,16 @@ fn parse_or(input: &str) -> Option<Range> {
     Range::from_bound_sets(sets)
 }
 
-fn parse_hyphen(input: &str, has_plus: bool) -> Option<Range> {
-    if has_plus {
-        return None;
-    }
-
+fn parse_hyphen(input: &str) -> Option<Range> {
     let bytes = input.as_bytes();
-    let (lower, mut i) = parse_partial_loose(input, 0)?;
-
-    i = skip_spaces1(bytes, i)?;
+    let (lower, i) = parse_partial_without_build(input, 0)?;
+    let i = skip_whitespace1(input, i)?;
     if bytes.get(i) != Some(&b'-') {
         return None;
     }
-    i += 1;
-    i = skip_spaces1(bytes, i)?;
+    let i = skip_whitespace1(input, i + 1)?;
 
-    let (upper, i) = parse_partial_loose(input, i)?;
+    let (upper, i) = parse_partial_without_build(input, i)?;
     if i != bytes.len() {
         return None;
     }
@@ -262,51 +107,40 @@ fn hyphen_upper(partial: Partial) -> Predicate {
     }
 }
 
-fn parse_comparator_set(input: &str, has_plus: bool) -> Option<Range> {
-    if has_plus {
-        return None;
-    }
-
+fn parse_comparator_set(input: &str) -> Option<Range> {
     let bytes = input.as_bytes();
     let mut i = 0;
     let mut current: Option<BoundSet> = None;
 
     loop {
         let (bound_set, next) = parse_comparator(input, i)?;
-        current = Some(if let Some(current) = current {
-            current.intersect(&bound_set)?
-        } else {
-            bound_set
-        });
-        i = next;
+        let set = match current {
+            Some(current) => current.intersect(&bound_set)?,
+            None => bound_set,
+        };
 
-        if i == bytes.len() {
-            break;
+        if next == bytes.len() {
+            return Some(Range::from_bound_set(set));
         }
 
-        if !is_space(bytes.get(i).copied()) {
+        i = skip_whitespace(input, next);
+        // Keep the comparators parsed so far instead of re-parsing them in `parse_or`.
+        if bytes[i..].starts_with(b"||") {
+            let mut sets = vec![set];
+            parse_or(&input[i + 2..])?.append_bound_sets_to(&mut sets);
+            return Range::from_bound_sets(sets);
+        }
+        if i == next || i == bytes.len() {
             return None;
         }
-        while is_space(bytes.get(i).copied()) {
-            i += 1;
-        }
-        if i == bytes.len() {
-            return None;
-        }
+        current = Some(set);
     }
-
-    current.map(Range::from_bound_set)
 }
 
 fn parse_comparator(input: &str, start: usize) -> Option<(BoundSet, usize)> {
-    let bytes = input.as_bytes();
-    let (operation, mut i) = parse_operation(bytes, start)?;
-
-    while is_space(bytes.get(i).copied()) {
-        i += 1;
-    }
-
-    let (partial, i) = parse_partial_loose(input, i)?;
+    let (operation, i) = parse_operation(input.as_bytes(), start)?;
+    let i = skip_whitespace(input, i);
+    let (partial, i) = parse_partial_without_build(input, i)?;
     primitive_range(operation, partial).map(|bound| (bound, i))
 }
 
@@ -395,6 +229,7 @@ fn primitive_range(operation: Operation, partial: Partial) -> Option<BoundSet> {
                 minor: Some(minor),
                 patch: Some(patch),
                 pre_release,
+                ..
             },
         ) => BoundSet::exact(Version::new_with_identifiers(
             major,
@@ -443,18 +278,9 @@ fn partial_to_version(partial: Partial) -> Version {
 }
 
 fn parse_caret(input: &str) -> Option<Range> {
-    let bytes = input.as_bytes();
-    let mut i = 1;
-
-    while matches!(
-        bytes.get(i),
-        Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
-    ) {
-        i += 1;
-    }
-
+    let i = skip_whitespace(input, 1);
     let (partial, i) = parse_partial_loose(input, i)?;
-    if i != bytes.len() {
+    if i != input.len() {
         return None;
     }
 
@@ -462,22 +288,13 @@ fn parse_caret(input: &str) -> Option<Range> {
 }
 
 fn parse_tilde(input: &str) -> Option<Range> {
-    let bytes = input.as_bytes();
-    let mut i = 1;
-
-    while is_space(bytes.get(i).copied()) {
-        i += 1;
-    }
-
-    if bytes.get(i) == Some(&b'>') {
-        i += 1;
-        while is_space(bytes.get(i).copied()) {
-            i += 1;
-        }
+    let mut i = skip_whitespace(input, 1);
+    if input.as_bytes().get(i) == Some(&b'>') {
+        i = skip_whitespace(input, i + 1);
     }
 
     let (partial, i) = parse_partial_loose(input, i)?;
-    if i != bytes.len() {
+    if i != input.len() {
         return None;
     }
 
@@ -539,6 +356,7 @@ fn tilde_range(partial: Partial) -> Option<BoundSet> {
             minor: Some(minor),
             patch,
             pre_release,
+            ..
         } => BoundSet::new(
             Bound::Lower(Predicate::Including(Version::new_with_identifiers(
                 major,
@@ -598,6 +416,7 @@ fn caret_range(partial: Partial) -> Option<BoundSet> {
             minor: Some(minor),
             patch: Some(patch),
             pre_release,
+            ..
         } => BoundSet::new(
             Bound::Lower(Predicate::Including(Version::new_with_identifiers(
                 major,
@@ -617,20 +436,20 @@ fn caret_range(partial: Partial) -> Option<BoundSet> {
 }
 
 fn parse_exact_version(bytes: &[u8]) -> Option<Version> {
-    let (major, mut i) = parse_number(bytes, 0)?;
+    let (major, mut i) = number(bytes, 0)?;
     if bytes.get(i) != Some(&b'.') {
         return None;
     }
     i += 1;
 
-    let (minor, next) = parse_number(bytes, i)?;
+    let (minor, next) = number(bytes, i)?;
     i = next;
     if bytes.get(i) != Some(&b'.') {
         return None;
     }
     i += 1;
 
-    let (patch, i) = parse_number(bytes, i)?;
+    let (patch, i) = number(bytes, i)?;
     if i != bytes.len() {
         return None;
     }
@@ -638,40 +457,9 @@ fn parse_exact_version(bytes: &[u8]) -> Option<Version> {
     Some(Version::from((major, minor, patch)))
 }
 
-fn parse_number(bytes: &[u8], start: usize) -> Option<(u64, usize)> {
-    let mut i = start;
-    let mut value = 0u64;
-
-    while let Some(ch @ b'0'..=b'9') = bytes.get(i).copied() {
-        value = value.checked_mul(10)?.checked_add(u64::from(ch - b'0'))?;
-        if value > MAX_SAFE_INTEGER {
-            return None;
-        }
-        i += 1;
-    }
-
-    (i > start).then_some((value, i))
-}
-
-fn is_space(ch: Option<u8>) -> bool {
-    ch.is_some_and(is_space_byte)
-}
-
-fn is_space_byte(ch: u8) -> bool {
-    matches!(ch, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
-}
-
-fn skip_spaces1(bytes: &[u8], start: usize) -> Option<usize> {
-    if !is_space(bytes.get(start).copied()) {
-        return None;
-    }
-
-    let mut i = start + 1;
-    while is_space(bytes.get(i).copied()) {
-        i += 1;
-    }
-
-    Some(i)
+fn skip_whitespace1(input: &str, start: usize) -> Option<usize> {
+    let i = skip_whitespace(input, start);
+    (i > start).then_some(i)
 }
 
 #[derive(Debug)]
@@ -680,6 +468,7 @@ struct Partial {
     minor: Option<u64>,
     patch: Option<u64>,
     pre_release: Identifiers,
+    has_build: bool,
 }
 
 fn parse_partial(input: &str, start: usize) -> Option<(Partial, usize)> {
@@ -688,6 +477,12 @@ fn parse_partial(input: &str, start: usize) -> Option<(Partial, usize)> {
 
 fn parse_partial_loose(input: &str, start: usize) -> Option<(Partial, usize)> {
     parse_partial_inner(input, start, true)
+}
+
+// Comparators and hyphen bounds keep build metadata, which only the loose
+// parser does, so leave such inputs to it.
+fn parse_partial_without_build(input: &str, start: usize) -> Option<(Partial, usize)> {
+    parse_partial_loose(input, start).filter(|(partial, _)| !partial.has_build)
 }
 
 fn parse_partial_inner(
@@ -701,13 +496,7 @@ fn parse_partial_inner(
     if bytes.get(i) == Some(&b'v') {
         i += 1;
     }
-
-    while matches!(
-        bytes.get(i),
-        Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
-    ) {
-        i += 1;
-    }
+    i = skip_whitespace(input, i);
 
     let (major, next) = parse_component(bytes, i)?;
     i = next;
@@ -715,6 +504,7 @@ fn parse_partial_inner(
     let mut minor = None;
     let mut patch = None;
     let mut pre_release = Identifiers::Empty;
+    let mut has_build = false;
 
     if bytes.get(i) == Some(&b'.') {
         let (parsed_minor, next) = parse_component(bytes, i + 1)?;
@@ -728,20 +518,21 @@ fn parse_partial_inner(
 
             if patch.is_some() {
                 if bytes.get(i) == Some(&b'-') {
-                    let (parsed_pre, next) = parse_identifiers(input, i + 1)?;
+                    let (parsed_pre, next) = identifiers(input, i + 1)?;
                     pre_release = parsed_pre;
                     i = next;
                 } else if allow_loose_suffix
                     && bytes.get(i).is_some_and(|ch| ch.is_ascii_alphanumeric())
                 {
-                    let (parsed_pre, next) = parse_identifiers(input, i)?;
+                    let (parsed_pre, next) = identifiers(input, i)?;
                     pre_release = parsed_pre;
                     i = next;
                 }
 
                 if bytes.get(i) == Some(&b'+') {
-                    let (_, next) = parse_identifiers(input, i + 1)?;
+                    let (_, next) = identifiers(input, i + 1)?;
                     i = next;
+                    has_build = true;
                 }
             }
         }
@@ -753,6 +544,7 @@ fn parse_partial_inner(
             minor,
             patch,
             pre_release,
+            has_build,
         },
         i,
     ))
@@ -761,108 +553,14 @@ fn parse_partial_inner(
 fn parse_component(bytes: &[u8], start: usize) -> Option<(Option<u64>, usize)> {
     match bytes.get(start).copied()? {
         b'x' | b'X' | b'*' => Some((None, start + 1)),
-        b'0'..=b'9' => parse_number(bytes, start).map(|(value, i)| (Some(value), i)),
+        b'0'..=b'9' => number(bytes, start).map(|(value, i)| (Some(value), i)),
         _ => None,
-    }
-}
-
-fn parse_identifiers(input: &str, start: usize) -> Option<(Identifiers, usize)> {
-    let bytes = input.as_bytes();
-    let mut i = start;
-    let mut identifiers = Identifiers::Empty;
-
-    loop {
-        let ident_start = i;
-        while matches!(
-            bytes.get(i),
-            Some(b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-')
-        ) {
-            i += 1;
-        }
-
-        if i == ident_start {
-            return None;
-        }
-
-        let ident = &input[ident_start..i];
-        if ident.bytes().all(|ch| ch.is_ascii_digit()) {
-            identifiers.push(match ident.parse::<u64>() {
-                Ok(value) => Identifier::Numeric(value),
-                Err(_) => Identifier::AlphaNumeric(ident.to_string()),
-            });
-        } else {
-            identifiers.push(Identifier::AlphaNumeric(ident.to_string()));
-        }
-
-        if bytes.get(i) != Some(&b'.') {
-            return Some((identifiers, i));
-        }
-
-        i += 1;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn short_word_accepts_only_inputs_up_to_one_word() {
-        assert!(ShortWord::new(b"").is_some());
-        assert!(ShortWord::new(b"1234567890123456").is_some());
-        assert!(ShortWord::new(b"12345678901234567").is_none());
-    }
-
-    #[test]
-    fn short_byte_search_ignores_zero_padding() {
-        assert!(!contains_byte_fast(b"abc", 0));
-        assert!(contains_byte_fast(b"a\0c", 0));
-        assert!(contains_byte_fast(b">=1.2.3", b'>'));
-        assert!(!contains_byte_fast(b">=1.2.3", b'+'));
-    }
-
-    #[test]
-    fn short_or_search_requires_adjacent_pipes() {
-        assert!(contains_or_fast("12345678901234||"));
-        assert!(contains_or_fast("^1 || ^2"));
-        assert!(!contains_or_fast("123456789012345|"));
-        assert!(!contains_or_fast("^1 | ^2"));
-        assert!(!contains_or_fast("|"));
-        assert!(!contains_or_fast(""));
-    }
-
-    #[test]
-    fn short_or_search_rejects_near_matches() {
-        // A false positive would recursively parse the same unsplit input.
-        assert!(!contains_or_fast("^|}"));
-        for len in 2..=SHORT_SCAN_MAX {
-            for start in 0..len - 1 {
-                for pair in [*b"|}", *b"}|", *b"||", *b"{{"] {
-                    let mut bytes = vec![b'a'; len];
-                    bytes[start..start + 2].copy_from_slice(&pair);
-                    let input = std::str::from_utf8(&bytes).unwrap();
-                    assert_eq!(contains_or_fast(input), input.contains("||"), "{input:?}");
-                }
-            }
-        }
-        for first in u8::MIN..=u8::MAX {
-            for second in u8::MIN..=u8::MAX {
-                let pair = [first, second];
-                assert_eq!(
-                    ShortWord::new(&pair).unwrap().contains_repeated_pair(b'|'),
-                    pair == *b"||",
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn scanners_fall_back_for_long_inputs() {
-        assert!(contains_byte_fast(b"12345678901234567+meta", b'+'));
-        assert!(!contains_byte_fast(b"12345678901234567-meta", b'+'));
-        assert!(contains_or_fast("12345678901234567||next"));
-        assert!(!contains_or_fast("12345678901234567|next"));
-    }
 
     #[test]
     fn parses_tilde_ranges() {
@@ -893,25 +591,5 @@ mod tests {
         }
 
         assert!(parse("1.2.3beta").is_none());
-    }
-
-    #[test]
-    fn parses_simple_garbage_ranges() {
-        let cases = [
-            ("1.2.3 foo", "1.2.3"),
-            ("foo 1.2.3", "1.2.3"),
-            ("~1.y 1.2.3", "1.2.3"),
-            ("1.2.3 ~1.y", "1.2.3"),
-        ];
-
-        for (input, expected) in cases {
-            assert_eq!(parse_garbage(input).unwrap().to_string(), expected);
-        }
-    }
-
-    #[test]
-    fn leaves_complex_garbage_ranges_to_fallback() {
-        assert!(parse_garbage("foo >= 1.2.3").is_none());
-        assert!(parse_garbage("foo 1.2.3-beta").is_none());
     }
 }

@@ -90,6 +90,66 @@ fn parse_errors_support_standard_error_handling() {
 }
 
 #[test]
+fn compound_ranges_keep_loose_only_tokens() {
+    for (input, expected) in [
+        ("^1.0.0 v1.2.3", "1.2.3"),
+        (">=1.0.0 v1.2.3", "1.2.3"),
+        ("^1.0.0 1.2.3beta", "1.2.3-beta"),
+        ("foo ~1.x.3", ">=1.0.0 <2.0.0-0"),
+    ] {
+        assert_eq!(
+            Range::parse(input).unwrap().to_string(),
+            expected,
+            "{input:?}"
+        );
+    }
+}
+
+#[test]
+fn javascript_whitespace_is_handled_consistently() {
+    for input in [
+        "<v 1",
+        "- 2.3.4",
+        "1.2.3 foo",
+        ">=1.2.3 <2.0.0",
+        "~> 1.2",
+        "1 - 2",
+        "^1 || ^2",
+    ] {
+        let expected = Range::parse(input).unwrap();
+        for padded in [
+            format!(" {input}\n"),
+            format!("\u{3000}{input}\u{A0}"),
+            format!("\u{FEFF}{input}\t"),
+        ] {
+            assert_eq!(Range::parse(&padded).unwrap(), expected, "{padded:?}");
+        }
+    }
+
+    for ws in [
+        "\t", "\n", "\r", "\u{0B}", "\u{0C}", "\u{A0}", "\u{2003}", "\u{3000}", "\u{FEFF}",
+    ] {
+        let range = |input: String| Range::parse(&input).map(|r| r.to_string());
+        assert_eq!(
+            range(format!(">=1.2.3{ws}<2.0.0")).unwrap(),
+            ">=1.2.3 <2.0.0"
+        );
+        assert_eq!(
+            range(format!("1.2.3{ws}||{ws}2.0.0")).unwrap(),
+            "1.2.3||2.0.0"
+        );
+        assert_eq!(range(format!("foo{ws}1.2.3-beta")).unwrap(), "1.2.3-beta");
+        for version in [
+            format!("{ws}1.2.3"),
+            format!("v{ws}1.2.3"),
+            format!("1.2.3{ws}x"),
+        ] {
+            assert_eq!(Version::parse(&version).unwrap().to_string(), "1.2.3");
+        }
+    }
+}
+
+#[test]
 fn near_or_separator_does_not_recurse() {
     for input in ["^|}", "~|}", ">|}", "1|}", "*|}"] {
         assert!(Range::parse(input).is_err());

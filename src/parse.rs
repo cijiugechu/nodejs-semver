@@ -1,6 +1,6 @@
 //! Shared scanning for the loose fallback parsers. Common inputs use the fast parsers.
 
-use crate::{Identifier, MAX_SAFE_INTEGER, Version};
+use crate::{Identifier, MAX_SAFE_INTEGER, Version, scan};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Cursor<'a> {
@@ -21,12 +21,11 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    // The legacy fallback separates tokens with spaces and tabs only.
+    #[inline(always)]
     pub(crate) fn spaces(&mut self) -> bool {
-        let rest = self.remaining.trim_start_matches([' ', '\t']);
-        let consumed = rest.len() != self.remaining.len();
-        self.remaining = rest;
-        consumed
+        let len = scan::skip_whitespace(self.remaining, 0);
+        self.remaining = &self.remaining[len..];
+        len > 0
     }
 
     pub(crate) fn number(&mut self) -> Option<u64> {

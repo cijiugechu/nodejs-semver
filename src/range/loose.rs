@@ -34,49 +34,53 @@ Loose mode (all LHS are invalid in strict mode):
 
 */
 
-use super::{Bound, BoundSet, Operation, Predicate, Range};
-use crate::{Identifier, MAX_SAFE_INTEGER, Version, parse::Cursor};
+use smallvec::SmallVec;
 
+use super::{Bound, BoundSet, Operation, Predicate, Range};
+use crate::{Identifier, MAX_SAFE_INTEGER, Version, parse::Cursor, scan};
+
+// Expects input without leading whitespace, so every `simple` starts on a token.
 pub(super) fn parse(input: &str) -> Option<Range> {
     let mut cursor = Cursor::new(input);
-    let mut sets = Vec::new();
+    let mut sets = SmallVec::new();
     loop {
-        let mut conjunction: Vec<BoundSet> = Vec::new();
+        let mut current: Option<BoundSet> = None;
         loop {
             if let Some(bound) = simple(&mut cursor) {
-                if let Some(last) = conjunction.pop() {
-                    if let Some(intersection) = last.intersect(&bound) {
-                        conjunction.push(intersection);
-                    } else {
+                current = Some(match current {
+                    Some(last) => last.intersect(&bound).unwrap_or_else(|| {
                         // Preserve loose parsing's treatment of disjoint bounds.
-                        conjunction.push(last);
-                        conjunction.push(bound);
-                    }
-                } else {
-                    conjunction.push(bound);
-                }
+                        sets.push(last);
+                        bound
+                    }),
+                    None => bound,
+                });
             }
             if !cursor.spaces() {
                 break;
             }
         }
-        sets.extend(conjunction);
+        sets.extend(current);
         if !cursor.eat("||") {
             break;
         }
         cursor.spaces();
     }
-    Range::from_bound_sets(sets)
+    (!sets.is_empty()).then(|| Range(sets))
 }
 
 fn boundary(input: &str) -> bool {
-    input.is_empty() || input.starts_with([' ', '\t']) || input.starts_with("||")
+    input.is_empty() || scan::whitespace_len(input, 0) > 0 || input.starts_with("||")
 }
 
 fn simple(cursor: &mut Cursor<'_>) -> Option<BoundSet> {
     // A recognized expression can yield no bounds; that is distinct from a
     // failed parse, which must rewind before trying the next grammar branch.
-    for parser in [hyphen, primitive, plain, tilde, caret] {
+    if let Some((bound, rest)) = hyphen_or_plain(*cursor) {
+        *cursor = rest;
+        return bound;
+    }
+    for parser in [primitive, tilde, caret] {
         let mut candidate = *cursor;
         if let Some(bound) = parser(&mut candidate) {
             if boundary(candidate.remaining) {
@@ -109,7 +113,7 @@ fn primitive(cursor: &mut Cursor<'_>) -> Option<Option<BoundSet>> {
         return None;
     };
     cursor.spaces();
-    let parsed = (operation, partial_version(cursor)?);
+    let parsed = (operation, token_partial(cursor)?);
     Some(match parsed {
         (GreaterThanEquals, partial) => BoundSet::at_least(Predicate::Including(partial.into())),
         (
@@ -214,9 +218,26 @@ fn primitive(cursor: &mut Cursor<'_>) -> Option<Option<BoundSet>> {
     })
 }
 
-fn plain(cursor: &mut Cursor<'_>) -> Option<Option<BoundSet>> {
-    let partial = partial_version(cursor)?;
-    Some(match partial {
+// `hyphen` and `plain` both start with a partial version: parse it once and
+// prefer the hyphen form, as the grammar order requires.
+fn hyphen_or_plain(cursor: Cursor<'_>) -> Option<(Option<BoundSet>, Cursor<'_>)> {
+    let mut after_lower = cursor;
+    let lower = partial_version(&mut after_lower)?;
+    let mut rest = after_lower;
+    match hyphen_upper(&mut rest).filter(|_| boundary(rest.remaining)) {
+        Some(upper) => Some((
+            BoundSet::new(
+                Bound::Lower(Predicate::Including(lower.into())),
+                Bound::Upper(upper),
+            ),
+            rest,
+        )),
+        None => boundary(after_lower.remaining).then(|| (plain(lower), after_lower)),
+    }
+}
+
+fn plain(partial: Partial) -> Option<BoundSet> {
+    match partial {
         Partial { major: None, .. } => BoundSet::at_least(Predicate::Including((0, 0, 0).into())),
         Partial {
             major: Some(major),
@@ -236,7 +257,7 @@ fn plain(cursor: &mut Cursor<'_>) -> Option<Option<BoundSet>> {
             Bound::Upper(Predicate::Excluding((major, minor + 1, 0, 0).into())),
         ),
         partial => BoundSet::exact(partial.into()),
-    })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -280,6 +301,13 @@ fn partial_version(cursor: &mut Cursor<'_>) -> Option<Partial> {
     })
 }
 
+// A partial that must end its token. Checking the boundary before building
+// bounds avoids constructing a candidate that `simple` would reject anyway.
+fn token_partial(cursor: &mut Cursor<'_>) -> Option<Partial> {
+    let partial = partial_version(cursor)?;
+    boundary(cursor.remaining).then_some(partial)
+}
+
 fn dotted_component(cursor: &mut Cursor<'_>) -> Option<Option<u64>> {
     let mut next = *cursor;
     if !next.eat(".") {
@@ -305,14 +333,14 @@ fn tilde(cursor: &mut Cursor<'_>) -> Option<Option<BoundSet>> {
     cursor.spaces();
     let gt = cursor.eat(">").then_some(());
     cursor.spaces();
-    let parsed = (gt, partial_version(cursor)?);
+    let parsed = (gt, token_partial(cursor)?);
+    // As in the fast parser, a wildcard minor ignores the patch.
     Some(match parsed {
         (
             Some(_gt),
             Partial {
                 major: Some(major),
                 minor: None,
-                patch: None,
                 ..
             },
         ) => BoundSet::new(
@@ -374,7 +402,6 @@ fn tilde(cursor: &mut Cursor<'_>) -> Option<Option<BoundSet>> {
             Partial {
                 major: Some(major),
                 minor: None,
-                patch: None,
                 ..
             },
         ) => BoundSet::new(
@@ -390,7 +417,7 @@ fn caret(cursor: &mut Cursor<'_>) -> Option<Option<BoundSet>> {
         return None;
     }
     cursor.spaces();
-    let parsed = partial_version(cursor)?;
+    let parsed = token_partial(cursor)?;
     Some(match parsed {
         Partial {
             major: Some(0),
@@ -449,17 +476,11 @@ fn caret(cursor: &mut Cursor<'_>) -> Option<Option<BoundSet>> {
     })
 }
 
-fn hyphen(cursor: &mut Cursor<'_>) -> Option<Option<BoundSet>> {
-    let mut start = *cursor;
-    let lower = partial_version(&mut start);
-    if lower.is_some() {
-        *cursor = start;
-    }
+fn hyphen_upper(cursor: &mut Cursor<'_>) -> Option<Predicate> {
     if !cursor.spaces() || !cursor.eat("-") || !cursor.spaces() {
         return None;
     }
-    let upper = partial_version(cursor)?;
-    let upper = match upper {
+    Some(match partial_version(cursor)? {
         Partial {
             major: None,
             minor: None,
@@ -479,13 +500,5 @@ fn hyphen(cursor: &mut Cursor<'_>) -> Option<Option<BoundSet>> {
             ..
         } => Predicate::Excluding((major, minor + 1, 0, 0).into()),
         partial => Predicate::Including(partial.into()),
-    };
-    Some(if let Some(lower) = lower {
-        BoundSet::new(
-            Bound::Lower(Predicate::Including(lower.into())),
-            Bound::Upper(upper),
-        )
-    } else {
-        BoundSet::at_most(upper)
     })
 }

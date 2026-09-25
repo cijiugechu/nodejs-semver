@@ -13,6 +13,7 @@ pub use range::*;
 
 mod parse;
 mod range;
+mod scan;
 mod version_fast;
 
 /// JavaScript's

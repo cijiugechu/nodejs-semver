@@ -102,7 +102,7 @@
   {
     "input": "\n1.2.3!",
     "range": null,
-    "version": null
+    "version": "1.2.3"
   },
   {
     "input": "1.2.3\nfoo",
@@ -126,12 +126,12 @@
   },
   {
     "input": "foo\n1.2.3-beta",
-    "range": null,
+    "range": "1.2.3-beta",
     "version": null
   },
   {
     "input": "foo 1.2.3-beta",
-    "range": null,
+    "range": "1.2.3-beta",
     "version": null
   },
   {
@@ -226,7 +226,7 @@
   },
   {
     "input": " - 2.3.4",
-    "range": "<=2.3.4",
+    "range": "2.3.4",
     "version": null
   },
   {

@@ -8,18 +8,15 @@ use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
 use smallvec::SmallVec;
 use thiserror::Error;
 
-use crate::{Identifier, SemverError, Version};
+use crate::{Identifier, SemverError, Version, scan};
 
 mod fast;
 mod loose;
 
+// A single token that cannot start a comparator is garbage to the loose parser
+// too, so reject it without running the fallback.
 fn should_skip_range_fallback(input: &str) -> bool {
-    let input = trim_range_edges_if_needed(input);
-    if starts_with_range_token(input) {
-        return false;
-    }
-
-    is_single_unparseable_token(input)
+    !starts_with_range_token(input) && is_single_token(input)
 }
 
 fn starts_with_range_token(input: &str) -> bool {
@@ -36,50 +33,28 @@ fn is_possible_range_token(ch: u8) -> bool {
     )
 }
 
-fn is_single_unparseable_token(input: &str) -> bool {
-    let mut has_colon = false;
-    let mut has_possible_range_token = false;
+fn is_single_token(input: &str) -> bool {
     let mut previous_was_pipe = false;
-
-    for ch in input.bytes() {
-        if is_range_token_separator(ch) {
+    for (i, &ch) in input.as_bytes().iter().enumerate() {
+        let is_pipe = ch == b'|';
+        if (is_pipe && previous_was_pipe)
+            || (scan::may_start_whitespace(ch) && scan::whitespace_len(input, i) > 0)
+        {
             return false;
         }
-
-        if ch == b':' {
-            has_colon = true;
-        }
-
-        if is_possible_range_token(ch) {
-            has_possible_range_token = true;
-        }
-
-        if ch == b'|' {
-            if previous_was_pipe {
-                return false;
-            }
-            previous_was_pipe = true;
-        } else {
-            previous_was_pipe = false;
-        }
+        previous_was_pipe = is_pipe;
     }
-
-    has_colon || !has_possible_range_token
+    true
 }
 
-fn is_range_token_separator(ch: u8) -> bool {
-    matches!(ch, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
-}
-
-// Avoid `str::trim()` on the common ASCII non-whitespace path, but keep it for
-// non-ASCII edges so Unicode whitespace preserves the old behavior.
+// Avoid trimming on the common path where neither edge byte can start whitespace.
 fn trim_range_edges_if_needed(input: &str) -> &str {
     let bytes = input.as_bytes();
     let (Some(first), Some(last)) = (bytes.first(), bytes.last()) else {
         return input;
     };
 
-    if needs_trim_check(*first) || needs_trim_check(*last) {
+    if scan::may_start_whitespace(*first) || scan::may_start_whitespace(*last) {
         trim_range_edges(input)
     } else {
         input
@@ -89,37 +64,23 @@ fn trim_range_edges_if_needed(input: &str) -> &str {
 #[cold]
 #[inline(never)]
 fn trim_range_edges(input: &str) -> &str {
-    input.trim()
+    scan::trim(input)
 }
 
-fn needs_trim_check(ch: u8) -> bool {
-    ch <= b' ' || ch >= 0x80
-}
-
-// Empty `||` ranges are rare; only enter the split/trim check when the first
-// meaningful byte can actually start that form.
+// Expects trimmed input. Empty `||` ranges are rare; only enter the split/trim
+// check when the first byte can actually start that form.
 fn is_empty_range(input: &str) -> bool {
-    let Some(first) = input.as_bytes().first().copied() else {
-        return true;
-    };
-
-    if first == b'|' {
-        return is_empty_or_range(input);
+    match input.as_bytes().first() {
+        None => true,
+        Some(b'|') => is_empty_or_range(input),
+        Some(_) => false,
     }
-
-    if needs_trim_check(first) {
-        let trimmed = trim_range_edges_if_needed(input);
-        return trimmed.is_empty()
-            || (trimmed.as_bytes().first() == Some(&b'|') && is_empty_or_range(input));
-    }
-
-    false
 }
 
 #[cold]
 #[inline(never)]
 fn is_empty_or_range(input: &str) -> bool {
-    input.split("||").all(|part| part.trim().is_empty())
+    input.split("||").all(|part| scan::trim(part).is_empty())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -604,19 +565,6 @@ impl fmt::Display for OutsideDirection {
     }
 }
 
-impl fmt::Display for Operation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use Operation::*;
-        match self {
-            Exact => write!(f, ""),
-            GreaterThan => write!(f, ">"),
-            GreaterThanEquals => write!(f, ">="),
-            LessThan => write!(f, "<"),
-            LessThanEquals => write!(f, "<="),
-        }
-    }
-}
-
 #[cfg(feature = "serde")]
 impl Serialize for Range {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
@@ -655,7 +603,7 @@ impl Range {
     Parse a range from a string.
     */
     pub fn parse<S: AsRef<str>>(input: S) -> Result<Self, SemverError> {
-        let input = input.as_ref();
+        let input = trim_range_edges_if_needed(input.as_ref());
 
         if is_empty_range(input) {
             return Ok(Self::any());
@@ -667,10 +615,6 @@ impl Range {
 
         if should_skip_range_fallback(input) {
             return Err(SemverError);
-        }
-
-        if let Some(range) = fast::parse_garbage(input) {
-            return Ok(range);
         }
 
         loose::parse(input).ok_or(SemverError)
@@ -1880,16 +1824,19 @@ mod tests {
 
     #[test]
     fn detects_empty_ranges() {
-        assert!(is_empty_range(""));
-        assert!(is_empty_range("   "));
-        assert!(is_empty_range("\u{2003}"));
-        assert!(is_empty_range("||"));
-        assert!(is_empty_range(" || || "));
+        let is_empty = |input| is_empty_range(trim_range_edges_if_needed(input));
+        assert!(is_empty(""));
+        assert!(is_empty("   "));
+        assert!(is_empty("\u{2003}"));
+        assert!(is_empty("\u{FEFF}"));
+        assert!(is_empty("||"));
+        assert!(is_empty(" || || "));
+        assert!(is_empty("\u{3000}||\u{A0}"));
 
-        assert!(!is_empty_range("|"));
-        assert!(!is_empty_range("|||"));
-        assert!(!is_empty_range("1.2.3"));
-        assert!(!is_empty_range("1.2.3 || 2.0.0"));
+        assert!(!is_empty("|"));
+        assert!(!is_empty("|||"));
+        assert!(!is_empty("1.2.3"));
+        assert!(!is_empty("1.2.3 || 2.0.0"));
     }
 
     macro_rules! range_parse_tests {
