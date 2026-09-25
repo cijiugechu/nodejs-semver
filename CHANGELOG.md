@@ -1,5 +1,28 @@
 # `nodejs-semver` Release Changelog
 
+<a name="7.0.0"></a>
+## 7.0.0 (2026-09-25)
+
+### Bug Fixes
+
+* **range:** compound ranges no longer silently drop tokens that the fast parser rejects but loose parsing accepts; `^1.0.0 v1.2.3` now yields `>=1.0.0 <2.0.0-0||1.2.3` instead of discarding `v1.2.3` ([fbd593c](https://github.com/cijiugechu/nodejs-semver/commit/fbd593c10858120270875459bb2f8aa5f7f4ca62))
+
+* **range:** `||` disjunctions following a comparator set are no longer parsed twice ([fbd593c](https://github.com/cijiugechu/nodejs-semver/commit/fbd593c10858120270875459bb2f8aa5f7f4ca62))
+
+### Performance
+
+* **parser:** share number, identifier, and whitespace scanning across the fast and loose parsers; remove the garbage-token fallback stage and make loose parsing allocate only when a range actually spans multiple `||` branches ([fbd593c](https://github.com/cijiugechu/nodejs-semver/commit/fbd593c10858120270875459bb2f8aa5f7f4ca62))
+
+### **BREAKING CHANGE**
+
+All parsers now use a single whitespace definition matching JavaScript's `\s` ([fbd593c](https://github.com/cijiugechu/nodejs-semver/commit/fbd593c10858120270875459bb2f8aa5f7f4ca62)).
+
+`Range::parse` trims leading and trailing whitespace before parsing, so inputs such as `" <v 1"` or `"<v 1 "` no longer change meaning based on edge whitespace. Non-space whitespace now also acts as a token separator, so `"foo\n1.2.3-beta"` parses as `1.2.3-beta` instead of failing.
+
+Loose parsing keeps tokens it accepts even when the fast parser cannot handle them, and tilde ranges accept `~1.x.3` with a prerelease suffix to match the fast parser.
+
+Callers relying on the exact set of accepted or rejected inputs, or on the displayed form of parsed ranges for inputs containing unusual whitespace or mixed loose and strict tokens, may observe different results.
+
 <a name="6.0.0"></a>
 ## 6.0.0 (2026-09-19)
 
